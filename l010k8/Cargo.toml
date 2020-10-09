@@ -7,13 +7,13 @@ version = "0.1.0"
 
 [dependencies]
 cortex-m = "0.6.3"
-cortex-m-rt = "0.6.10"
+cortex-m-rt = "0.6.13"
 mcp25625 = { path = "../../mcp25625" }
 bq769x0 = { path = "../../bq769x0", features = ["crc"] }
 embedded-hal = "0.2.3"
 
 [dependencies.crc-any]
-version = "2.3.0"
+version = "2.3"
 default-features = false
 
 [dependencies.stm32l0xx-hal]

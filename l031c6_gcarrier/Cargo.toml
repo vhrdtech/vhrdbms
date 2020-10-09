@@ -12,7 +12,13 @@ mcu_helper = { path = "../mcu_helper" }
 panic_ramlog = { path = "../../panic_ramlog" }
 #rtt-target = { version = "0.2.2" }
 jlink_rtt = { git = "https://github.com/romixlab/jlink_rtt" }
+mcp25625 = { path = "../../mcp25625" }
+bq769x0 = { path = "../../bq769x0", features = ["crc"] }
 
 [dependencies.stm32l0xx-hal]
 version = "0.6.2"
-features = ["rt", "stm32l0x1"]
+features = ["rt", "mcu-STM32L031C6Ux"]
+
+[dependencies.crc-any]
+version = "2.3.5"
+default-features = false
