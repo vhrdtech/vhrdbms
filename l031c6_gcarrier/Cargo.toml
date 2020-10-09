@@ -1,0 +1,18 @@
+[package]
+name = "l031c6_gcarrier"
+version = "0.1.0"
+authors = ["Roman Isaikin <romix.lab@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+cortex-m = "0.6.3"
+cortex-m-rt = "0.6.13"
+cortex-m-rtic = "0.5.5"
+mcu_helper = { path = "../mcu_helper" }
+panic_ramlog = { path = "../../panic_ramlog" }
+#rtt-target = { version = "0.2.2" }
+jlink_rtt = { git = "https://github.com/romixlab/jlink_rtt" }
+
+[dependencies.stm32l0xx-hal]
+version = "0.6.2"
+features = ["rt", "stm32l0x1"]
