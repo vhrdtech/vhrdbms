@@ -1,0 +1,24 @@
+[package]
+authors = ["Roman Isaikin"]
+edition = "2018"
+readme = "README.md"
+name = "l010k8"
+version = "0.1.0"
+
+[dependencies]
+cortex-m = "0.6.3"
+cortex-m-rt = "0.6.10"
+mcp25625 = { path = "../../mcp25625" }
+bq769x0 = { path = "../../bq769x0", features = ["crc"] }
+embedded-hal = "0.2.3"
+
+[dependencies.crc-any]
+version = "2.3.0"
+default-features = false
+
+[dependencies.stm32l0xx-hal]
+version = "0.5.0"
+features = ["stm32l0x1", "rt"]
+
+[dependencies.jlink_rtt]
+git = "https://github.com/romixlab/jlink_rtt"
