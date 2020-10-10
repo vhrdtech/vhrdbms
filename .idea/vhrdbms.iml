@@ -7,6 +7,7 @@
       <sourceFolder url="file://$MODULE_DIR$/l010k8/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/l031c6_gcarrier/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/mcu_helper/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/power_helper/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
