@@ -3,7 +3,8 @@
 members = [
     "l010k8",
     "l031c6_gcarrier",
-    "mcu_helper"
+    "mcu_helper",
+    "power_helper"
 ]
 
 [profile.release]
