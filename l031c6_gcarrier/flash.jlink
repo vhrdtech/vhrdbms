@@ -1,0 +1,9 @@
+device STM32L031C6
+si SWD
+speed 4000
+connect
+erase
+loadbin ../target/thumbv6m-none-eabi/release/l031c6_gcarrier.bin, 0x08000000
+r
+g
+exit
