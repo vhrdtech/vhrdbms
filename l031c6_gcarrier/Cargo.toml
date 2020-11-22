@@ -18,6 +18,7 @@ mcp25625 = { path = "../../mcp25625" }
 bq769x0 = { path = "../../bq769x0", features = ["crc"] }
 heapless = "0.5"
 hash32 = "0.1"
+cfg-if = "1.0.0"
 
 [dependencies.stm32l0xx-hal]
 version = "0.6.2"
@@ -26,3 +27,6 @@ features = ["rt", "mcu-STM32L031C6Ux"]
 [dependencies.crc-any]
 version = "2.3.5"
 default-features = false
+
+[features]
+cli = []

@@ -42,7 +42,6 @@ const APP: () = {
         mcp25625: config::Mcp25625Instance,
         i2c: config::InternalI2c,
         bq76920: BQ769x0,
-        tms_sop: config::TmsSopPin,
         power_blocks: config::PowerBlocksMap
     }
 
@@ -94,8 +93,6 @@ const APP: () = {
         // External connector switch U15
         let ps_5v0_m12_en = gpiob.pb11.into_push_pull_output();
         //let ps_5v0_m12_pgood = gpiob.pb8.into_pull_up_input(); // trace reworked
-        let mut tms_sop = gpiob.pb8.into_open_drain_output(); // TDO net
-        tms_sop.set_high().ok(); // high - normal state, low - into jtag mode during power on
         let pb_5v0_m12: PowerBlock<_, DummyInputPin> = PowerBlock::new(
             Switch, ps_5v0_m12_en, None
         );
@@ -156,7 +153,7 @@ const APP: () = {
         let _ = power_blocks.insert(Switch5V0Usb, Box::new(pb_5v0_usb));
 
         power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).expect("I1").enable();
-        power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").disable();
+        power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
 
 
         // SPI<->CANBus MCP25625T-E/ML
@@ -241,7 +238,6 @@ const APP: () = {
             mcp25625,
             i2c,
             bq76920,
-            tms_sop,
             power_blocks,
         }
     }
@@ -306,7 +302,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, power_blocks, tms_sop]
+        resources = [i2c, bq76920, rtt, power_blocks]
     )]
     fn idle(cx: idle::Context) -> ! {
         tasks::idle::idle(cx);

@@ -256,6 +256,7 @@ version = "0.1.0"
 dependencies = [
  "alloc-cortex-m",
  "bq769x0",
+ "cfg-if",
  "cortex-m",
  "cortex-m-rt",
  "cortex-m-rtic",

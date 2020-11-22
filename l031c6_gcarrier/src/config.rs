@@ -2,7 +2,7 @@ use crate::hal;
 
 use hal::gpio::{
     gpioa::*,
-    gpiob::*,
+    // gpiob::*,
 };
 use hal::gpio::{Analog, PushPull, Output, OpenDrain};
 
@@ -22,6 +22,3 @@ pub type PowerBlocksMap =  heapless::FnvIndexMap::<PowerBlockId, Box<dyn PowerBl
 
 // Internal i2c
 pub type InternalI2c = hal::i2c::I2c<hal::pac::I2C1, PA10<Output<OpenDrain>>, PA9<Output<OpenDrain>>>;
-
-// TMS320
-pub type TmsSopPin = PB8<Output<OpenDrain>>;
