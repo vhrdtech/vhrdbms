@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Build release l031c6_gcarrier" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="channel" value="DEFAULT" />
-    <option name="command" value="+nightly build --release --color always --features=&quot;cli&quot;" />
+    <option name="command" value="+nightly build --release --color always --features=&quot;cli bitbang-i2c&quot;" />
     <option name="allFeatures" value="false" />
     <option name="emulateTerminal" value="false" />
     <option name="backtrace" value="SHORT" />

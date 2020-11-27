@@ -21,4 +21,14 @@ use crate::power_block::PowerBlockId;
 pub type PowerBlocksMap =  heapless::FnvIndexMap::<PowerBlockId, Box<dyn PowerBlockControl>, heapless::consts::U16>;
 
 // Internal i2c
+#[cfg(not(feature = "bitbang-i2c"))]
 pub type InternalI2c = hal::i2c::I2c<hal::pac::I2C1, PA10<Output<OpenDrain>>, PA9<Output<OpenDrain>>>;
+#[cfg(feature = "bitbang-i2c")]
+pub type InternalI2c = bitbang_hal::i2c::I2cBB<PA9<Output<OpenDrain>>, PA10<Output<OpenDrain>>, hal::timer::Timer<hal::pac::TIM2>>;
+
+// TCA9534 I2C GPIO expander pins
+use tca9535::tca9534::Port;
+pub const TCA_TMS_TDO_PIN: Port = Port::P00;
+pub const TCA_MXM_ON_OFF_PIN: Port = Port::P01;
+pub const TCA_MXM_BOOT_SRC_PIN: Port = Port::P02;
+pub const TCA_VHCG_DIV_EN_PIN: Port = Port::P03; // Do not forgot to solder on rev.B boards

@@ -12,5 +12,6 @@ pub fn panic_blink_led() {
             led.toggle().ok();
             cortex_m::asm::delay(200_000);
         }
+        cortex_m::peripheral::SCB::sys_reset(); // -> !
     }
 }

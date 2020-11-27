@@ -32,6 +32,9 @@ use crate::power_block::PowerBlockId;
 
 use mcp25625::{MCP25625, MCP25625Config};
 use bq769x0::BQ769x0;
+use tca9535::tca9534::Tca9534;
+
+use cfg_if::cfg_if;
 
 #[app(device = stm32l0xx_hal::pac, peripherals = true, monotonic = mcu_helper::tim_cyccnt::TimCyccnt)]
 const APP: () = {
@@ -42,7 +45,8 @@ const APP: () = {
         mcp25625: config::Mcp25625Instance,
         i2c: config::InternalI2c,
         bq76920: BQ769x0,
-        power_blocks: config::PowerBlocksMap
+        power_blocks: config::PowerBlocksMap,
+        tca9534: Tca9534<config::InternalI2c>
     }
 
     #[init(
@@ -92,9 +96,9 @@ const APP: () = {
         let _ = power_blocks.insert(Switch5V0Syscan, Box::new(pb_5v0_syscan));
         // External connector switch U15
         let ps_5v0_m12_en = gpiob.pb11.into_push_pull_output();
-        //let ps_5v0_m12_pgood = gpiob.pb8.into_pull_up_input(); // trace reworked
-        let pb_5v0_m12: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-            Switch, ps_5v0_m12_en, None
+        let ps_5v0_m12_pgood = gpiob.pb8.into_pull_up_input(); // trace reworked
+        let pb_5v0_m12 = PowerBlock::new(
+            Switch, ps_5v0_m12_en, Some(ps_5v0_m12_pgood)
         );
         let _ = power_blocks.insert(Switch5V0M12, Box::new(pb_5v0_m12));
         // Flex to radars switch U17
@@ -122,11 +126,11 @@ const APP: () = {
         let ps_3v3_uwblc_en = gpiob.pb12.into_push_pull_output();
         let ps_3v3_uwbhc_en = gpiob.pb6.into_push_pull_output();
         let ps_3v3_uwb_pgood = gpiob.pb7.into_pull_up_input();
-        let pb_3v3_uwblc = PowerBlock::new(
-            Switch, ps_3v3_uwblc_en, Some(ps_3v3_uwb_pgood)
+        let pb_3v3_uwblc: PowerBlock<_, DummyInputPin>   = PowerBlock::new(
+            Switch, ps_3v3_uwblc_en, None
         );
-        let pb_3v3_uwbhc: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-            Switch, ps_3v3_uwbhc_en, None
+        let pb_3v3_uwbhc= PowerBlock::new(
+            Switch, ps_3v3_uwbhc_en, Some(ps_3v3_uwb_pgood)
         );
         let _ = power_blocks.insert(Switch3V3UWBLc, Box::new(pb_3v3_uwblc));
         let _ = power_blocks.insert(Switch3V3UWBHc, Box::new(pb_3v3_uwbhc));
@@ -152,8 +156,9 @@ const APP: () = {
         );
         let _ = power_blocks.insert(Switch5V0Usb, Box::new(pb_5v0_usb));
 
-        power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).expect("I1").enable();
-        power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
+        // power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).expect("I1").enable();
+        // power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
+        power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
 
 
         // SPI<->CANBus MCP25625T-E/ML
@@ -199,7 +204,14 @@ const APP: () = {
         use bq769x0::Config as BQ769x0Config;
         let scl = gpioa.pa9.into_open_drain_output();
         let sda = gpioa.pa10.into_open_drain_output();
-        let mut i2c = device.I2C1.i2c(sda, scl, 100.khz(), &mut rcc);
+        cfg_if! {
+            if #[cfg(feature = "bitbang-i2c")] {
+                let i2c_timer = device.TIM2.timer(200.khz(), &mut rcc);
+                let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, i2c_timer);
+            } else {
+                let mut i2c = device.I2C1.i2c(sda, scl, 100.khz(), &mut rcc);
+            }
+        }
         // Prepare crc8 library
         //let mut crc8 = CRCu8::crc8();
         // Prepare bq76920 config
@@ -229,6 +241,12 @@ const APP: () = {
         let r = bq76920.discharge(&mut i2c, true);
         let _ = writeln!(rtt, "DE: {:?}", r);
 
+        let tca9534 = Tca9534::new(&mut i2c, tca9535::Address::ADDR_0x20);
+        let r = tca9534.write_config(&mut i2c, tca9535::tca9534::Port::empty());
+        let _ = writeln!(rtt, "tca9534: {}", r.is_ok());
+        let _ = tca9534.write_outputs(&mut i2c, tca9535::tca9534::Port::empty());
+
+
         cx.spawn.blinker().ok();
 
         init::LateResources {
@@ -239,6 +257,7 @@ const APP: () = {
             i2c,
             bq76920,
             power_blocks,
+            tca9534
         }
     }
 
@@ -247,7 +266,7 @@ const APP: () = {
             &clocks,
             status_led,
             rtt,
-            mcp25625
+            mcp25625,
         ],
         schedule = [
             blinker,
@@ -302,7 +321,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, power_blocks]
+        resources = [i2c, bq76920, rtt, power_blocks, tca9534]
     )]
     fn idle(cx: idle::Context) -> ! {
         tasks::idle::idle(cx);

@@ -19,6 +19,7 @@ bq769x0 = { path = "../../bq769x0", features = ["crc"] }
 heapless = "0.5"
 hash32 = "0.1"
 cfg-if = "1.0.0"
+tca9535 = { path = "../../tca9535-rs" }
 
 [dependencies.stm32l0xx-hal]
 version = "0.6.2"
@@ -28,5 +29,10 @@ features = ["rt", "mcu-STM32L031C6Ux"]
 version = "2.3.5"
 default-features = false
 
+[dependencies.bitbang-hal]
+version = "0.3.2"
+optional = true
+
 [features]
 cli = []
+bitbang-i2c = ["bitbang-hal"]

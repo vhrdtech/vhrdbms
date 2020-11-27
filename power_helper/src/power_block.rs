@@ -1,4 +1,6 @@
 use embedded_hal::digital::v2::{OutputPin, InputPin};
+use core::fmt;
+use mcu_helper::color;
 
 pub enum PowerBlockType {
     DcDc,
@@ -16,7 +18,7 @@ pub trait PowerBlockControl {
     fn enable(&mut self);
     fn disable(&mut self);
     fn is_enabled(&self) -> bool;
-    fn status_is_ok(&self) -> bool;
+    fn status_is_ok(&self) -> Option<bool>;
 }
 
 impl<EnPin: OutputPin, StatPin: InputPin> PowerBlockControl for PowerBlock<EnPin, StatPin> {
@@ -34,15 +36,14 @@ impl<EnPin: OutputPin, StatPin: InputPin> PowerBlockControl for PowerBlock<EnPin
         self.enabled
     }
 
-    fn status_is_ok(&self) -> bool {
-        if !self.enabled {
-            true
+    fn status_is_ok(&self) -> Option<bool> {
+        if self.stat_pin.is_none() {
+            None
         } else {
-            match &self.stat_pin {
-                Some(stat_pin) => {
-                    stat_pin.is_high().unwrap_or(false)
-                },
-                None => { true }
+            if !self.enabled {
+                Some(true)
+            } else {
+                Some(self.stat_pin.as_ref().unwrap().is_high().unwrap_or(false))
             }
         }
     }
@@ -59,5 +60,26 @@ impl<EnPin: OutputPin, StatPin: InputPin> PowerBlock<EnPin, StatPin> {
     pub fn new(r#type: PowerBlockType, mut en_pin: EnPin, stat_pin: Option<StatPin>) -> Self {
         en_pin.set_low().ok();
         Self { r#type, en_pin, stat_pin, enabled: false }
+    }
+}
+
+impl fmt::Debug for dyn PowerBlockControl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_enabled() {
+            let _ = write!(f, "{}Enabled", color::GREEN);
+            match self.status_is_ok() {
+                Some(status) => {
+                    if status {
+                        let _ = write!(f, ", Good");
+                    } else {
+                        let _ = write!(f, "{}, Bad", color::RED);
+                    }
+                },
+                None => {}
+            }
+            write!(f, "{}", color::DEFAULT)
+        } else {
+            write!(f, "{}Disabled{}", color::YELLOW, color::DEFAULT)
+        }
     }
 }
