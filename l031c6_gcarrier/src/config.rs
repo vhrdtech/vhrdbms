@@ -6,19 +6,23 @@ use hal::gpio::{
 };
 use hal::gpio::{Analog, PushPull, Output, OpenDrain};
 
+//
+pub const CHARGER_CHECK_INTERVAL_MS: u32 = 2000;
+
 // Mcp25625
 pub type Mcp25625Sck = PA5<Analog>;
 pub type Mcp25625Miso = PA6<Analog>;
 pub type Mcp25625Mosi = PA7<Analog>;
 pub type Mcp25625Cs = PA4<Output<PushPull>>;
 pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<hal::pac::SPI1, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
+pub type Mcp25625Irq = PA1<Input<PullDown>>;
 
 // DCDCs and Switches
 // Make sure size is enough, since it is not easily possible to check that unfortunately
 use alloc::boxed::Box;
 use power_helper::power_block::PowerBlockControl;
 use crate::power_block::PowerBlockId;
-pub type PowerBlocksMap =  heapless::FnvIndexMap::<PowerBlockId, Box<dyn PowerBlockControl>, heapless::consts::U16>;
+pub type PowerBlocksMap =  heapless::FnvIndexMap::<PowerBlockId, Box<dyn PowerBlockControl + Send>, heapless::consts::U16>;
 
 // Internal i2c
 #[cfg(not(feature = "bitbang-i2c"))]
@@ -28,7 +32,17 @@ pub type InternalI2c = bitbang_hal::i2c::I2cBB<PA9<Output<OpenDrain>>, PA10<Outp
 
 // TCA9534 I2C GPIO expander pins
 use tca9535::tca9534::Port;
+use stm32l0xx_hal::gpio::{Input, Floating, PullDown};
+
 pub const TCA_TMS_TDO_PIN: Port = Port::P00;
 pub const TCA_MXM_ON_OFF_PIN: Port = Port::P01;
 pub const TCA_MXM_BOOT_SRC_PIN: Port = Port::P02;
 pub const TCA_VHCG_DIV_EN_PIN: Port = Port::P03; // Do not forgot to solder on rev.B boards
+
+// Power button
+pub type ButtonPin = PA11<Input<Floating>>;
+pub const BUTTON_LONG_PRESS_MS: u32 = 2000;
+
+// Afe IO
+pub type AfeWakePin = PA12<Output<PushPull>>;
+pub type VchgDivPin = PA2<Analog>;
