@@ -1,4 +1,4 @@
-device STM32L031C6
+device STM32L051C8
 si SWD
 speed 4000
 connect

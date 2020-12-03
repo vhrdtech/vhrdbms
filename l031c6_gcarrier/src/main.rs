@@ -2,9 +2,12 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
+#[macro_use]
+mod util;
 mod tasks;
 mod config;
 mod power_block;
+mod board_components;
 
 use core::fmt::Write;
 use jlink_rtt::NonBlockingOutput;
@@ -25,6 +28,7 @@ use hal::prelude::*;
 use hal::gpio::{Output, PushPull};
 use hal::gpio::gpioc::PC14;
 use hal::rcc::MSIRange;
+use hal::adc::Adc;
 
 use mcu_helper::tim_cyccnt::{U32Ext};
 use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin, PowerBlockControl};
@@ -40,17 +44,24 @@ use cfg_if::cfg_if;
 const APP: () = {
     struct Resources {
         clocks: hal::rcc::Clocks,
+        bms_state: tasks::bms::BmsState,
+        afe_io: tasks::bms::AfeIo,
+        adc: Adc<hal::adc::Ready>,
         status_led: PC14<Output<PushPull>>,
         rtt: NonBlockingOutput,
         mcp25625: config::Mcp25625Instance,
+        mcp25625_irq: config::Mcp25625Irq,
         i2c: config::InternalI2c,
         bq76920: BQ769x0,
         power_blocks: config::PowerBlocksMap,
-        tca9534: Tca9534<config::InternalI2c>
+        tca9534: Tca9534<config::InternalI2c>,
+        exti: Exti,
+        button: config::ButtonPin,
+        button_state: tasks::button::ButtonState
     }
 
     #[init(
-        spawn = [blinker]
+        spawn = [bms_event, blinker]
     )]
     fn init(cx: init::Context) -> init::LateResources {
         let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
@@ -62,12 +73,14 @@ const APP: () = {
         let size = 1024; // in bytes
         unsafe { ALLOCATOR.init(start, size) }
 
-        let _core/*: cortex_m::Peripherals */= cx.core;
+        // let core/*: cortex_m::Peripherals */= cx.core;
         let device: hal::pac::Peripherals = cx.device;
 
         let rcc = device.RCC;//.constrain();
         let mut rcc = rcc.freeze(hal::rcc::Config::msi(MSIRange::Range5)); // Range5 = 2.097MHz
         let clocks = rcc.clocks;
+        let mut syscfg = SYSCFG::new(device.SYSCFG, &mut rcc);
+        let mut exti = Exti::new(device.EXTI);
 
         let gpioa = device.GPIOA.split(&mut rcc);
         let gpiob = device.GPIOB.split(&mut rcc);
@@ -160,11 +173,41 @@ const APP: () = {
         // power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
         power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
 
+        // Enable IRQ on power button input
+        let button = gpioa.pa11.into_floating_input();
+        let button_line = GpioLine::from_raw_line(button.pin_number()).unwrap();
+        exti.listen_gpio(&mut syscfg, button.port(), button_line, TriggerEdge::Falling);
+
+        // BQ76920 wake pin
+        let mut afe_wake_pin = gpioa.pa12.into_push_pull_output();
+        afe_wake_pin.set_high().ok();
+        cortex_m::asm::delay(100_000);
+        afe_wake_pin.set_low().ok();
+        // Charge voltage sense, divider enable on TCA9534.P3
+        let vchg_div_pin = gpioa.pa2.into_analog();
+        let mut adc = device.ADC.constrain(&mut rcc);
+        unsafe {
+            let device = hal::pac::Peripherals::steal();
+            let adc = device.ADC;
+            adc.cfgr2.modify(|_, w| w.ckmode().pclk());
+            adc.cr.modify(|_, w| w.adcal().set_bit());
+            while adc.cr.read().adcal().bit_is_set() {}
+            writeln!(rtt, "ADC cal done: {}", adc.calfact.read().bits()).ok();
+        }
+        // let mut adc = Adc::new(device.ADC, &mut rcc);
+        adc.set_precision(Precision::B_12);
+        adc.set_sample_time(SampleTime::T_160_5);
+        let afe_io = tasks::bms::AfeIo {
+            afe_wake_pin,
+            vchg_div_pin
+        };
 
         // SPI<->CANBus MCP25625T-E/ML
         let mcp_freq = 1.mhz();
         // GPIO init
-        let _mcp_int         = gpioa.pa1;
+        let mcp25625_irq         = gpioa.pa1.into_pull_down_input();
+        let mcp_int_line = GpioLine::from_raw_line(mcp25625_irq.pin_number()).unwrap();
+        exti.listen_gpio(&mut syscfg, mcp25625_irq.port(), mcp_int_line, TriggerEdge::Falling);
         let mcp_stby         = gpioa.pa0; // NORMAL mode is low, SLEEP is high
         let mcp_cs         = gpioa.pa4;
         let mcp_sck         = gpioa.pa5;
@@ -194,8 +237,12 @@ const APP: () = {
         };
         let r = mcp25625.apply_config(mcp_config);
         writeln!(rtt, "mcp: {:?}", r).ok();
-        mcp25625.reset_interrupt_flags(0);
-        mcp25625.reset_error_flags();
+        let _ = mcp25625.reset_interrupt_flags(0);
+        let _ = mcp25625.reset_error_flags();
+        let _ = mcp25625.masks_rxall();
+        let r = mcp25625.change_mode(mcp25625::McpOperationMode::Normal);
+        writeln!(rtt, "mcp->normal: {:?}", r).ok();
+        // mcp25625.enable_interrupts();
 
         // Internal I2C to AFE and Gauge
         //use crc_any::CRCu8;
@@ -220,12 +267,12 @@ const APP: () = {
             shunt: MicroOhms(2000),
             scd_delay: SCDDelay::_400uS,
             scd_threshold: Amperes(100),
-            ocd_delay: OCDDelay::_1280ms,
-            ocd_threshold: Amperes(50),
+            ocd_delay: OCDDelay::_640ms,
+            ocd_threshold: Amperes(25),
             uv_delay: UVDelay::_4s,
             uv_threshold: MilliVolts(3050),
             ov_delay: OVDelay::_4s,
-            ov_threshold: MilliVolts(4150)
+            ov_threshold: MilliVolts(4250)
         };
         match bq76920.init(&mut i2c, &bq769x0_config) {
             Ok(_actual) => {
@@ -238,35 +285,64 @@ const APP: () = {
                 let _ = writeln!(rtt, "afe init err:{:?}", e);
             }
         }
-        let r = bq76920.discharge(&mut i2c, true);
-        let _ = writeln!(rtt, "DE: {:?}", r);
+        // let r = bq76920.discharge(&mut i2c, true);
+        // let _ = writeln!(rtt, "DE: {:?}", r);
 
         let tca9534 = Tca9534::new(&mut i2c, tca9535::Address::ADDR_0x20);
         let r = tca9534.write_config(&mut i2c, tca9535::tca9534::Port::empty());
         let _ = writeln!(rtt, "tca9534: {}", r.is_ok());
         let _ = tca9534.write_outputs(&mut i2c, tca9535::tca9534::Port::empty());
 
-
+        cx.spawn.bms_event(tasks::bms::BmsEvent::CheckCharger).ok();
         cx.spawn.blinker().ok();
+
+        let bms_state = tasks::bms::BmsState::default();
+        let button_state = tasks::button::ButtonState::default();
 
         init::LateResources {
             clocks,
+            bms_state,
+            afe_io,
+            adc,
             status_led,
             rtt,
             mcp25625,
+            mcp25625_irq,
             i2c,
             bq76920,
             power_blocks,
-            tca9534
+            tca9534,
+            exti,
+            button,
+            button_state,
         }
     }
 
     #[task(
         resources = [
             &clocks,
-            status_led,
+            bms_state,
+            i2c,
+            bq76920,
             rtt,
-            mcp25625,
+            power_blocks,
+            tca9534,
+            adc,
+            afe_io
+        ],
+        capacity = 4,
+        schedule = [
+            bms_event,
+        ]
+    )]
+    fn bms_event(cx: bms_event::Context, e: tasks::bms::BmsEvent) {
+        tasks::bms::bms_event(cx, e);
+    }
+
+    #[task(
+        resources = [
+            &clocks,
+            status_led,
         ],
         schedule = [
             blinker,
@@ -276,48 +352,48 @@ const APP: () = {
         cx.resources.status_led.toggle().ok();
         let schedule_at = cx.scheduled + 2_000_000.cycles();
         cx.schedule.blinker(schedule_at).ok();
+    }
 
-        //let rtt = cx.resources.rtt;
+    #[task(
+        binds = EXTI0_1,
+        resources = [
+            &clocks,
+            exti,
+            mcp25625,
+            mcp25625_irq,
+            rtt
+        ],
+            spawn = [button_event]
+    )]
+    fn canctrl_irq(cx: canctrl_irq::Context) {
+        tasks::canbus::canctrl_irq(cx);
+    }
 
-        // use mcp25625::{McpReceiveBuffer, CanAddress, McpPriority};
-        // let mcp25625 = cx.resources.mcp25625;
-        // let intf = mcp25625.interrupt_flags();
-        // writeln!(rtt, "{:?}", intf).ok();
-        // let errf = mcp25625.error_flags();
-        // writeln!(rtt, "{:?}", errf).ok();
-        //
-        // if intf.rx0if_is_set() {
-        //     let message = mcp25625.receive(McpReceiveBuffer::Buffer0);
-        //     writeln!(rtt, "rx0:{:?}", message).ok();
-        // }
-        // if intf.rx1if_is_set() {
-        //     let message = mcp25625.receive(McpReceiveBuffer::Buffer1);
-        //     writeln!(rtt, "rx1:{:?}", message).ok();
-        // }
-        // let tec = mcp25625.tec();
-        // let rec = mcp25625.rec();
-        // writeln!(rtt, "tec:{}, rec:{}", tec, rec).ok();
-        //
-        // //mcp25625.reset_interrupt_flags(intf.bits);
-        // //mcp25625.reset_error_flags();
-        //
-        // let mut empty_tx_bufs = 0u8;
-        // if intf.tx0if_is_set() {
-        //     empty_tx_bufs = empty_tx_bufs + 1
-        // }
-        // if intf.tx1if_is_set() {
-        //     empty_tx_bufs = empty_tx_bufs + 1
-        // }
-        // if intf.tx2if_is_set() {
-        //     empty_tx_bufs = empty_tx_bufs + 1
-        // }
-        // if empty_tx_bufs > 0 {
-        //     writeln!(rtt, "{} tx buffers free", empty_tx_bufs).ok();
-        // }
-        //
-        //
-        // let r = mcp25625.send(CanAddress::extended(0x1769A5F3), &[0xaa, 0xbb, 0xcc, 0xdd], McpPriority::Low);
-        // writeln!(rtt, "tx: {:?}", r).ok();
+    #[task(
+        binds = EXTI4_15,
+        resources = [
+            &clocks,
+            button,
+            button_state,
+        ],
+        spawn = [button_event]
+    )]
+    fn button_irq(cx: button_irq::Context) {
+        tasks::button::button_irq(cx);
+    }
+
+    #[task(
+        resources = [
+            &clocks,
+            button,
+            button_state,
+            rtt
+        ],
+        schedule = [button_event],
+        spawn = [bms_event]
+    )]
+    fn button_event(cx: button_event::Context) {
+        tasks::button::button_event(cx);
     }
 
     #[idle(
@@ -345,6 +421,10 @@ fn oom(_: Layout) -> ! {
 }
 
 use core::panic::PanicInfo;
+use stm32l0xx_hal::exti::{GpioLine, ExtiLine, TriggerEdge, Exti};
+use stm32l0xx_hal::syscfg::SYSCFG;
+use stm32l0xx_hal::adc::{Precision, SampleTime};
+
 #[inline(never)]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
