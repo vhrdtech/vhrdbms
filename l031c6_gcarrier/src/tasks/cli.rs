@@ -1,4 +1,4 @@
-use bq769x0::BQ769x0;
+use bq769x0::{BQ769x0};
 use core::fmt::Write;
 use crate::config;
 use mcu_helper::color;
@@ -103,13 +103,19 @@ fn afe_command(
                 "dsg" => {
                     match one_of(part_cmd, &["off", "on"], fmt) {
                         Some(offon) => {
-                            for i in 0..10 {
+                            for _ in 0..10 {
                                 let r = bq769x0.sys_stat_reset(i2c);
                                 writeln!(fmt, "st_res: {:?}", r).ok();
-                                let r = bq769x0.discharge(i2c, offon != 0);
-                                writeln!(fmt, "try: {:?}", r).ok();
-                                if r.is_ok() {
-                                    break;
+                                let _ = bq769x0.discharge(i2c, offon != 0);
+                                cortex_m::asm::delay(400_000);
+                                match bq769x0.sys_stat(i2c) {
+                                    Ok(stat) => {
+                                        if !stat.scd_is_set() {
+                                            let _ = writeln!(fmt, "no scd, done");
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => {}
                                 }
                                 cortex_m::asm::delay(100_000);
                             }
@@ -226,7 +232,7 @@ fn power_blocks_command(
                     block.enable();
                 },
                 2 => {
-                    writeln!(fmt, "{}: {:?}", block_name, block).ok();
+                    writeln!(fmt, "UC").ok();
                 },
                 _ => unreachable!()
             }
