@@ -23,7 +23,7 @@ tca9535 = { path = "../../tca9535-rs" }
 
 [dependencies.stm32l0xx-hal]
 version = "0.6.2"
-features = ["rt", "mcu-STM32L031C6Ux"]
+features = ["rt", "io-STM32L051", "stm32l0x1", "ufqfpn48"]
 
 [dependencies.crc-any]
 version = "2.3.5"

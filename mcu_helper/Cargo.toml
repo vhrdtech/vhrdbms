@@ -10,4 +10,4 @@ cortex-m-rtic = "0.5.5"
 
 [dependencies.stm32l0xx-hal]
 version = "0.6"
-features = ["rt", "mcu-STM32L031C6Ux"]
+features = ["rt", "io-STM32L051", "stm32l0x1", "ufqfpn48"]
