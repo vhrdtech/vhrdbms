@@ -293,8 +293,10 @@ const APP: () = {
         let _ = writeln!(rtt, "tca9534: {}", r.is_ok());
         let _ = tca9534.write_outputs(&mut i2c, tca9535::tca9534::Port::empty());
 
-        cx.spawn.bms_event(tasks::bms::BmsEvent::CheckCharger).ok();
-        cx.spawn.blinker().ok();
+        cx.spawn.bms_event(tasks::bms::BmsEvent::CheckCharger).unwrap();
+        cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
+        cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
+        cx.spawn.blinker().unwrap();
 
         let bms_state = tasks::bms::BmsState::default();
         let button_state = tasks::button::ButtonState::default();

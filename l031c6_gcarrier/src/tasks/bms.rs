@@ -1,13 +1,16 @@
 use crate::{config, tasks};
-use bq769x0::BQ769x0;
+use bq769x0::{BQ769x0, MilliVolts};
 use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
 use tca9535::tca9534::{Tca9534, Port};
 use crate::hal::prelude::_embedded_hal_adc_OneShot;
+use jlink_rtt::NonBlockingOutput;
 
+#[derive(Debug)]
 pub enum BmsEvent {
     TogglePower,
     CheckCharger,
+    CheckBalancing,
 }
 
 #[derive(Default)]
@@ -16,6 +19,8 @@ pub struct BmsState {
 
     charge_enabled: bool,
     vchg_prev_mv: u32,
+
+    balancing_state: BalancingState
 }
 
 pub enum Error {
@@ -32,6 +37,36 @@ impl From<bq769x0::Error> for Error {
 pub struct AfeIo {
     pub afe_wake_pin: config::AfeWakePin,
     pub vchg_div_pin: config::VchgDivPin
+}
+
+enum BalancingStage {
+    /// Find cells with delta from lower >= config::BALANCE_START_DELTA_MV
+    /// If at least one found -> Phase1, else -> CheckStart
+    CheckStart,
+    /// Enable balancing for the first set of cells
+    Phase1,
+    /// Enable balancing for the second set of cells (if not empty)
+    Phase2,
+}
+impl Default for BalancingStage {
+    fn default() -> Self {
+        BalancingStage::CheckStart
+    }
+}
+
+struct BalancingState {
+    stage: BalancingStage,
+    phase1: u16,
+    phase2: u16,
+}
+impl Default for BalancingState {
+    fn default() -> Self {
+        BalancingState {
+            stage: BalancingStage::default(),
+            phase1: 0,
+            phase2: 0
+        }
+    }
 }
 
 pub fn afe_discharge(
@@ -111,7 +146,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 //writeln!(rtt, "vchg: {}mV", vchg).ok();
                 if bms_state.vchg_prev_mv != 0 {
                     let dvchg_mv = vchg as i32 - bms_state.vchg_prev_mv as i32;
-                    if dvchg_mv > 100 {
+                    if dvchg_mv > 200 {
                         let r = bq769x0.charge(i2c, true);
                         writeln!(rtt, "Charger plugged, en:{:?}", r).ok();
                         bms_state.charge_enabled = true;
@@ -120,6 +155,86 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bms_state.vchg_prev_mv = vchg;
             }
             cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckCharger).ok();
+        },
+        BmsEvent::CheckBalancing => {
+            let _ = check_balancing(i2c, bq769x0, &mut bms_state.balancing_state, rtt);
+            cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::BALANCING_CHECK_INTERVAL_MS), BmsEvent::CheckBalancing).ok();
         }
     }
+}
+
+fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
+    i2c: &mut config::InternalI2c,
+    bq769x0: &mut BQ769x0,
+    f: F
+) -> Result<(u16, u16), Error> {
+    let cells = bq769x0.cell_voltages(i2c)?;
+    let low_cell = *cells.iter().min().unwrap();
+    let unbalanced_cells = cells
+        .iter()
+        .map(|cell| f(*cell, low_cell))
+        .enumerate().map(|(i, c)| (c as u16) << i)
+        .fold(0u16, |acc, cell_mask| acc | cell_mask);
+    let phase_1 = unbalanced_cells & 0b00101010_10101010;
+    let phase_2 = unbalanced_cells & 0b01010101_01010101;
+    Ok((phase_1, phase_2))
+}
+
+fn check_balancing(
+    i2c: &mut config::InternalI2c,
+    bq769x0: &mut BQ769x0,
+    state: &mut BalancingState,
+    rtt: &mut NonBlockingOutput
+) -> Result<(), Error> {
+    state.stage = match state.stage {
+        BalancingStage::CheckStart => {
+            let balance_phases = find_cells(i2c, bq769x0, |cell, low_cell| {
+                (cell.0 - low_cell.0) > config::BALANCE_START_DELTA_MV
+            })?;
+            if balance_phases.0 != 0 || balance_phases.1 != 0 {
+                writeln!(rtt, "CheckStart {:05b} {:05b}", balance_phases.0, balance_phases.1).ok();
+                state.phase1 = balance_phases.0;
+                state.phase2 = balance_phases.1;
+                BalancingStage::Phase1
+            } else {
+                writeln!(rtt, "Balanced").ok();
+                BalancingStage::CheckStart
+            }
+        }
+        BalancingStage::Phase1 => {
+            if state.phase1 != 0 {
+                writeln!(rtt, "Phase1 {:05b}", state.phase1).ok();
+                bq769x0.enable_balancing(i2c, state.phase1 as u8)?;
+            }
+            BalancingStage::Phase2
+        }
+        BalancingStage::Phase2 => {
+            if state.phase2 != 0 {
+                writeln!(rtt, "Phase2 {:05b}", state.phase2).ok();
+                bq769x0.enable_balancing(i2c, state.phase2 as u8)?;
+            }
+            let stop_balancing = find_cells(i2c, bq769x0, |cell, low_cell| {
+                (cell.0 - low_cell.0) < config::BALANCE_STOP_DELTA_MV
+            })?;
+            writeln!(rtt, "CheckStop {:05b} {:05b}", stop_balancing.0, stop_balancing.1).ok();
+            state.phase1 &= !stop_balancing.0;
+            state.phase2 &= !stop_balancing.1;
+            if state.phase1 != 0 || state.phase2 != 0 {
+                BalancingStage::Phase1
+            } else {
+                bq769x0.enable_balancing(i2c, 0)?;
+                BalancingStage::CheckStart
+            }
+        }
+    };
+
+    //let max_delta = cells.iter().map(|cell| *cell - low_cell).max().unwrap();
+
+    // let mut i = 1;
+    // for needs_balancing in unbalanced_cells {
+    //     writeln!(rtt, "{}: {}", i, needs_balancing);
+    //     i += 1;
+    // }
+    // writeln!(rtt, "max_delta: {}", max_delta).ok();
+    Ok(())
 }
