@@ -51,6 +51,7 @@ const APP: () = {
         rtt: NonBlockingOutput,
         mcp25625: config::Mcp25625Instance,
         mcp25625_irq: config::Mcp25625Irq,
+        can_tx: config::CanTX,
         i2c: config::InternalI2c,
         bq76920: BQ769x0,
         power_blocks: config::PowerBlocksMap,
@@ -61,7 +62,7 @@ const APP: () = {
     }
 
     #[init(
-        spawn = [bms_event, blinker]
+        spawn = [bms_event, api, blinker]
     )]
     fn init(cx: init::Context) -> init::LateResources {
         let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
@@ -239,10 +240,13 @@ const APP: () = {
         writeln!(rtt, "mcp: {:?}", r).ok();
         let _ = mcp25625.reset_interrupt_flags(0);
         let _ = mcp25625.reset_error_flags();
+        let _ = mcp25625.rx_configure(true, false);
         let _ = mcp25625.masks_rxall();
         let r = mcp25625.change_mode(mcp25625::McpOperationMode::Normal);
         writeln!(rtt, "mcp->normal: {:?}", r).ok();
-        // mcp25625.enable_interrupts();
+        mcp25625.enable_interrupts(0b0001_1111);
+        // Queues
+        let can_tx = config::CanTX::new();
 
         // Internal I2C to AFE and Gauge
         //use crc_any::CRCu8;
@@ -268,7 +272,7 @@ const APP: () = {
             scd_delay: SCDDelay::_400uS,
             scd_threshold: Amperes(100),
             ocd_delay: OCDDelay::_640ms,
-            ocd_threshold: Amperes(25),
+            ocd_threshold: Amperes(50),
             uv_delay: UVDelay::_4s,
             uv_threshold: MilliVolts(3050),
             ov_delay: OVDelay::_4s,
@@ -310,6 +314,7 @@ const APP: () = {
             rtt,
             mcp25625,
             mcp25625_irq,
+            can_tx,
             i2c,
             bq76920,
             power_blocks,
@@ -345,6 +350,7 @@ const APP: () = {
         resources = [
             &clocks,
             status_led,
+            can_tx
         ],
         schedule = [
             blinker,
@@ -357,15 +363,27 @@ const APP: () = {
     }
 
     #[task(
+        resources = [
+            &clocks,
+            can_tx
+        ],
+        schedule = [api]
+    )]
+    fn api(cx: api::Context, e: tasks::api::Event) {
+        tasks::api::api(cx, e);
+    }
+
+    #[task(
         binds = EXTI0_1,
         resources = [
             &clocks,
             exti,
             mcp25625,
             mcp25625_irq,
+            can_tx,
             rtt
         ],
-            spawn = [button_event]
+        spawn = [button_event]
     )]
     fn canctrl_irq(cx: canctrl_irq::Context) {
         tasks::canbus::canctrl_irq(cx);

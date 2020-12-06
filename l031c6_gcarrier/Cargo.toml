@@ -20,6 +20,7 @@ heapless = "0.5"
 hash32 = "0.1"
 cfg-if = "1.0.0"
 tca9535 = { path = "../../tca9535-rs" }
+vhrdcan = { path = "../../vhrdcan" }
 
 [dependencies.stm32l0xx-hal]
 version = "0.6.2"
