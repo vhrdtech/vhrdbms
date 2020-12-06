@@ -153,7 +153,7 @@ fn afe_command(
                     match bq769x0.cell_voltages(i2c) {
                         Ok(cells) => {
                             for (i, cell) in cells.iter().enumerate() {
-                                let _ = writeln!(fmt, "C{}: {}mV", i + 1, cell);
+                                let _ = writeln!(fmt, "C{}: {}", i + 1, cell);
                             }
                         }
                         Err(e) => {
@@ -232,7 +232,7 @@ fn power_blocks_command(
                     block.enable();
                 },
                 2 => {
-                    writeln!(fmt, "UC").ok();
+                    writeln!(fmt, "{}: {:?}", block_name, block).ok();
                 },
                 _ => unreachable!()
             }

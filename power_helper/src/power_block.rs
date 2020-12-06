@@ -63,7 +63,7 @@ impl<EnPin: OutputPin, StatPin: InputPin> PowerBlock<EnPin, StatPin> {
     }
 }
 
-impl fmt::Debug for dyn PowerBlockControl {
+impl fmt::Debug for dyn PowerBlockControl + Send {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_enabled() {
             let _ = write!(f, "{}Enabled", color::GREEN);
