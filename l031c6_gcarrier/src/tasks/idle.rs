@@ -11,6 +11,7 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
             let mut i2c = cx.resources.i2c;
             let mut power_blocks = cx.resources.power_blocks;
             let mut tca9534 = cx.resources.tca9534;
+            let spawn = cx.spawn;
         }
     }
 
@@ -22,7 +23,7 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
                         bq769x0.lock(|bq769x0| {
                             power_blocks.lock(|power_blocks| {
                                 tca9534.lock(|tca9534| {
-                                    super::cli::cli(rtt, i2c, bq769x0, power_blocks, tca9534);
+                                    super::cli::cli(rtt, i2c, bq769x0, power_blocks, tca9534, spawn);
                                 })
                             })
                         });

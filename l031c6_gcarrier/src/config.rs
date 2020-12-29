@@ -3,6 +3,7 @@ use crate::hal;
 use hal::gpio::{
     gpioa::*,
     // gpiob::*,
+    gpioc::*,
 };
 use hal::gpio::{Analog, PushPull, Output, OpenDrain};
 
@@ -48,10 +49,11 @@ pub const BUTTON_LONG_PRESS_MS: u32 = 2000;
 // Afe IO
 pub type AfeWakePin = PA12<Output<PushPull>>;
 pub type VchgDivPin = PA2<Analog>;
+pub type DcDcEnPin = PC13<Output<PushPull>>;
 
 // Balancing
-pub const BALANCE_START_DELTA_MV: u32 = 25;
-pub const BALANCE_STOP_DELTA_MV: u32 = 5;
+pub const BALANCE_START_DELTA_MV: u32 = 3;
+// pub const BALANCE_STOP_DELTA_MV: u32 = 5;
 
 // CanBus Protocol
 use stm32l0xx_hal::pac::Interrupt;

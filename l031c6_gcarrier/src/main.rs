@@ -31,7 +31,7 @@ use hal::rcc::MSIRange;
 use hal::adc::Adc;
 
 use mcu_helper::tim_cyccnt::{U32Ext};
-use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin, PowerBlockControl};
+use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin};
 use crate::power_block::PowerBlockId;
 
 use mcp25625::{MCP25625, MCP25625Config};
@@ -95,12 +95,13 @@ const APP: () = {
         // Be careful with the map size!
         let mut power_blocks = config::PowerBlocksMap::new();
         // BMS Low Iq DC-DC
-        let dcdc_5v0_bms_en = gpioc.pc13.into_push_pull_output();
-        let mut pb_5v0_bms: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-            DcDc, dcdc_5v0_bms_en, None
-        );
-        pb_5v0_bms.enable(); // enable right away
-        let _ = power_blocks.insert(DcDc5V0Bms, Box::new(pb_5v0_bms)); // .expect("I0");
+        let mut dcdc_5v0_bms_en = gpioc.pc13.into_push_pull_output();
+        dcdc_5v0_bms_en.set_high().ok();
+        // let mut pb_5v0_bms: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+        //     DcDc, dcdc_5v0_bms_en, None
+        // );
+        // pb_5v0_bms.enable(); // enable right away
+        // let _ = power_blocks.insert(DcDc5V0Bms, Box::new(pb_5v0_bms)); // .expect("I0");
         // CAN bus transceivers switch U16
         let ps_5v0_syscan_en = gpioa.pa3.into_push_pull_output();
         let ps_5v0_syscan_pgood = gpiob.pb3.into_pull_up_input();
@@ -200,7 +201,8 @@ const APP: () = {
         adc.set_sample_time(SampleTime::T_160_5);
         let afe_io = tasks::bms::AfeIo {
             afe_wake_pin,
-            vchg_div_pin
+            vchg_div_pin,
+            dcdc_en_pin: dcdc_5v0_bms_en
         };
 
         // SPI<->CANBus MCP25625T-E/ML
@@ -242,7 +244,7 @@ const APP: () = {
         let _ = mcp25625.reset_error_flags();
         let _ = mcp25625.rx_configure(true, false);
         let _ = mcp25625.masks_rxall();
-        let r = mcp25625.change_mode(mcp25625::McpOperationMode::Normal);
+        let r = mcp25625.change_mode(mcp25625::McpOperationMode::Loopback);
         writeln!(rtt, "mcp->normal: {:?}", r).ok();
         mcp25625.enable_interrupts(0b0001_1111);
         // Queues
@@ -337,7 +339,7 @@ const APP: () = {
             adc,
             afe_io
         ],
-        capacity = 4,
+        capacity = 8,
         schedule = [
             bms_event,
         ]
@@ -417,7 +419,8 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, power_blocks, tca9534]
+        resources = [i2c, bq76920, rtt, power_blocks, tca9534],
+        spawn = [bms_event]
     )]
     fn idle(cx: idle::Context) -> ! {
         tasks::idle::idle(cx);

@@ -6,6 +6,7 @@ use crate::power_block::PowerBlockId;
 use core::convert::TryFrom;
 use tca9535::tca9534::Tca9534;
 use crate::config::TCA_MXM_BOOT_SRC_PIN;
+use crate::tasks::bms::BmsEvent;
 // use power_helper::power_block::PowerBlockControl;
 // use stm32l0xx_hal::prelude::OutputPin;
 
@@ -25,7 +26,8 @@ pub fn cli(
     i2c: &mut config::InternalI2c,
     bq769x0: &mut BQ769x0,
     power_blocks: &mut config::PowerBlocksMap,
-    tca9534: &mut Tca9534<config::InternalI2c>
+    tca9534: &mut Tca9534<config::InternalI2c>,
+    spawn: crate::idle::Spawn
 ) {
     let mut rtt_down = [0u8; 128];
     let rtt_down_len = jlink_rtt::try_read(&mut rtt_down);
@@ -41,7 +43,7 @@ pub fn cli(
                     match cmd {
                         "help" => {
                             writeln!(rtt, "cmd [a] [a]...").ok();
-                            writeln!(rtt, "cmds: afe, pb, imx, reset, tms").ok();
+                            writeln!(rtt, "cmds: afe, pb, imx, reset, halt, tms").ok();
                         },
                         "afe" => {
                             afe_command(&mut args, i2c, bq769x0, rtt);
@@ -54,8 +56,12 @@ pub fn cli(
                         },
                         "tms" => {
                             tms_command(&mut args, i2c, tca9534, power_blocks, rtt);
-                        }, "reset" => {
+                        },
+                        "reset" => {
                             cortex_m::peripheral::SCB::sys_reset(); // -> !
+                        },
+                        "halt" => {
+                            spawn.bms_event(BmsEvent::Halt).ok();
                         },
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
@@ -117,7 +123,7 @@ fn afe_command(
                                     }
                                     Err(_) => {}
                                 }
-                                cortex_m::asm::delay(100_000);
+                                cortex_m::asm::delay(50_000);
                             }
                         },
                         None => {}
