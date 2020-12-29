@@ -21,6 +21,8 @@ hash32 = "0.1"
 cfg-if = "1.0.0"
 tca9535 = { path = "../../tca9535-rs" }
 vhrdcan = { path = "../../vhrdcan" }
+btoi = { version = "0.4.2", default-features = false }
+no-std-compat = "0.4.1"
 
 [dependencies.stm32l0xx-hal]
 version = "0.6.2"

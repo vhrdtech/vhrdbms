@@ -9,6 +9,9 @@ use crate::config::TCA_MXM_BOOT_SRC_PIN;
 use crate::tasks::bms::BmsEvent;
 // use power_helper::power_block::PowerBlockControl;
 // use stm32l0xx_hal::prelude::OutputPin;
+use btoi::{btoi, ParseIntegerError, btoi_radix};
+use no_std_compat::prelude::v1::*;
+use crate::hal::prelude::*;
 
 fn print_str_array(strs: &[&str], fmt: &mut dyn core::fmt::Write) {
     write!(fmt, "{}", color::YELLOW).ok();
@@ -62,6 +65,9 @@ pub fn cli(
                         },
                         "halt" => {
                             spawn.bms_event(BmsEvent::Halt).ok();
+                        },
+                        "i2c" => {
+                            i2c_command(&mut args, i2c, rtt);
                         },
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
@@ -342,4 +348,85 @@ fn tms_command(
             writeln!(fmt, "{}error{}", color::RED, color::DEFAULT).ok();
         }
     }
+}
+
+macro_rules! ok_or_return {
+    ($e: expr, $fmt: ident, $message: expr) => {
+        match $e {
+            Ok(x) => x,
+            Err(_) => {
+                writeln!($fmt, "{}{}{}", color::YELLOW, $message, color::DEFAULT).ok();
+                return;
+            }
+        }
+    }
+}
+
+macro_rules! some_or_return {
+    ($e: expr, $fmt: ident, $message: expr) => {
+        match $e {
+            Some(x) => x,
+            None => {
+                writeln!($fmt, "{}{}{}", color::YELLOW, $message, color::DEFAULT).ok();
+                return;
+            }
+        }
+    }
+}
+
+fn i2c_command(
+    args: &mut core::str::SplitAsciiWhitespace,
+    i2c: &mut config::InternalI2c,
+    fmt: &mut dyn core::fmt::Write
+) {
+    const MAX_TRANSFER: usize = 64;
+
+    let subcmd = some_or_return!(args.next(), fmt, "i2c read/scan");
+    let mut buf = [0u8; MAX_TRANSFER];
+    match subcmd {
+        "read" => {
+            let addr = some_or_return!(args.next(), fmt, "no addr");
+            let addr: Result<u8, ParseIntegerError> = btoi_radix(addr.as_bytes(), 16);
+            let addr = ok_or_return!(addr, fmt, "wrong addr");
+
+            let len = some_or_return!(args.next(), fmt, "no len");
+            let len: Result<u8, ParseIntegerError> = btoi(len.as_bytes());
+            let len = ok_or_return!(len, fmt, "wrong len");
+            let len = if len <= MAX_TRANSFER as u8 {
+                len as usize
+            } else {
+                writeln!(fmt, "len>{}", MAX_TRANSFER).ok();
+                return;
+            };
+            let r = i2c.read(addr, &mut buf[..len]);
+            match r {
+                Ok(()) => {
+                    writeln!(fmt, "{}ok:{}", color::GREEN, color::DEFAULT).ok();
+                    for i in 0..len {
+                        writeln!(fmt, "\t{:02x}: {:02x}={:08b}", addr + i as u8, buf[i], buf[i]).ok();
+                    }
+                },
+                Err(e) => {
+                    writeln!(fmt, "{}err:{:?}{}", color::RED, e, color::DEFAULT).ok();
+                }
+            };
+        },
+        "scan" => {
+            for i in 0..=127u8 {
+                if i % 8 == 0 {
+                    writeln!(fmt, "").ok();
+                }
+                match i2c.read(i, &mut buf[0..1]) {
+                    Ok(_) => {
+                        write!(fmt, "{:02x} ", i).ok();
+                    },
+                    Err(_) => {
+                        write!(fmt, ".. ").ok();
+                    }
+                }
+
+            }
+        },
+        _ => {}
+    };
 }
