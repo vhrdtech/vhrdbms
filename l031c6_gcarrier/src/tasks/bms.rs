@@ -5,12 +5,15 @@ use mcu_helper::tim_cyccnt::U32Ext;
 use tca9535::tca9534::{Tca9534, Port};
 use crate::hal::prelude::_embedded_hal_adc_OneShot;
 use jlink_rtt::NonBlockingOutput;
+use stm32l0xx_hal::prelude::OutputPin;
+use mcu_helper::color;
 
 #[derive(Debug)]
 pub enum BmsEvent {
     TogglePower,
     CheckCharger,
     CheckBalancing,
+    Halt,
 }
 
 #[derive(Default)]
@@ -36,7 +39,8 @@ impl From<bq769x0::Error> for Error {
 
 pub struct AfeIo {
     pub afe_wake_pin: config::AfeWakePin,
-    pub vchg_div_pin: config::VchgDivPin
+    pub vchg_div_pin: config::VchgDivPin,
+    pub dcdc_en_pin: config::DcDcEnPin,
 }
 
 enum BalancingStage {
@@ -45,8 +49,8 @@ enum BalancingStage {
     CheckStart,
     /// Enable balancing for the first set of cells
     Phase1,
-    /// Enable balancing for the second set of cells (if not empty)
-    Phase2,
+    // Enable balancing for the second set of cells (if not empty)
+    // Phase2,
 }
 impl Default for BalancingStage {
     fn default() -> Self {
@@ -112,7 +116,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bms_state.power_enabled = false;
                 writeln!(rtt, "Power disabled").ok();
             } else {
-                crate::board_components::imx_prepare_boot(i2c, tca9534);
+                crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
                 bms_state.power_enabled = afe_discharge(i2c, bq769x0, true).is_ok(); // TODO: bb
                 writeln!(rtt, "Power enabled?: {}", bms_state.power_enabled).ok();
                 if bms_state.power_enabled {
@@ -137,13 +141,16 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     Err(_) => {}
                 }
             } else {
-                tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, config::TCA_VHCG_DIV_EN_PIN).ok();
+                let r =     tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, config::TCA_VHCG_DIV_EN_PIN);
+                if r.is_err() {
+                    writeln!(rtt, "{}vchg tca err{}", color::RED, color::DEFAULT).ok();
+                }
                 cortex_m::asm::delay(100_000);
                 let vchg_raw = adc.read(&mut afe_io.vchg_div_pin) as Result<u32, _>;
                 let vchg_raw = vchg_raw.unwrap_or(0);
                 tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, Port::empty()).ok();
                 let vchg = (vchg_raw * 8 * 3300) / 1 / 4095;
-                //writeln!(rtt, "vchg: {}mV", vchg).ok();
+                writeln!(rtt, "vchg: {}mV", vchg).ok();
                 if bms_state.vchg_prev_mv != 0 {
                     let dvchg_mv = vchg as i32 - bms_state.vchg_prev_mv as i32;
                     if dvchg_mv > 200 {
@@ -159,6 +166,17 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
         BmsEvent::CheckBalancing => {
             let _ = check_balancing(i2c, bq769x0, &mut bms_state.balancing_state, rtt);
             cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::BALANCING_CHECK_INTERVAL_MS), BmsEvent::CheckBalancing).ok();
+        },
+        BmsEvent::Halt => {
+            match bq769x0.ship_enter(i2c) {
+                Ok(_) => {
+                    writeln!(rtt, "Halt: ok").ok();
+                    afe_io.dcdc_en_pin.set_low().ok();
+                },
+                Err(e) => {
+                    writeln!(rtt, "Halt: {:?}", e).ok();
+                }
+            }
         }
     }
 }
@@ -203,29 +221,29 @@ fn check_balancing(
         }
         BalancingStage::Phase1 => {
             if state.phase1 != 0 {
-                writeln!(rtt, "Phase1 {:05b}", state.phase1).ok();
+                // writeln!(rtt, "Phase1 {:05b}", state.phase1).ok();
                 bq769x0.enable_balancing(i2c, state.phase1 as u8)?;
             }
-            BalancingStage::Phase2
+            BalancingStage::CheckStart
         }
-        BalancingStage::Phase2 => {
-            if state.phase2 != 0 {
-                writeln!(rtt, "Phase2 {:05b}", state.phase2).ok();
-                bq769x0.enable_balancing(i2c, state.phase2 as u8)?;
-            }
-            let stop_balancing = find_cells(i2c, bq769x0, |cell, low_cell| {
-                (cell.0 - low_cell.0) < config::BALANCE_STOP_DELTA_MV
-            })?;
-            writeln!(rtt, "CheckStop {:05b} {:05b}", stop_balancing.0, stop_balancing.1).ok();
-            state.phase1 &= !stop_balancing.0;
-            state.phase2 &= !stop_balancing.1;
-            if state.phase1 != 0 || state.phase2 != 0 {
-                BalancingStage::Phase1
-            } else {
-                bq769x0.enable_balancing(i2c, 0)?;
-                BalancingStage::CheckStart
-            }
-        }
+        // BalancingStage::Phase2 => {
+        //     if state.phase2 != 0 {
+        //         // writeln!(rtt, "Phase2 {:05b}", state.phase2).ok();
+        //         bq769x0.enable_balancing(i2c, state.phase2 as u8)?;
+        //     }
+        //     let stop_balancing = find_cells(i2c, bq769x0, |cell, low_cell| {
+        //         (cell.0 - low_cell.0) < config::BALANCE_STOP_DELTA_MV
+        //     })?;
+        //     // writeln!(rtt, "CheckStop {:05b} {:05b}", stop_balancing.0, stop_balancing.1).ok();
+        //     state.phase1 &= !stop_balancing.0;
+        //     state.phase2 &= !stop_balancing.1;
+        //     if state.phase1 != 0 || state.phase2 != 0 {
+        //         BalancingStage::Phase1
+        //     } else {
+        //         bq769x0.enable_balancing(i2c, 0)?;
+        //         BalancingStage::CheckStart
+        //     }
+        // }
     };
 
     //let max_delta = cells.iter().map(|cell| *cell - low_cell).max().unwrap();
