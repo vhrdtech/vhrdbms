@@ -141,6 +141,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     Err(_) => {}
                 }
             } else {
+                tca9534.write_config(i2c, tca9535::tca9534::Port::empty()).ok(); // Fix glitched reset?
                 let r =     tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, config::TCA_VHCG_DIV_EN_PIN);
                 if r.is_err() {
                     writeln!(rtt, "{}vchg tca err{}", color::RED, color::DEFAULT).ok();
