@@ -125,43 +125,44 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             }
         },
         BmsEvent::CheckCharger => {
-            if bms_state.charge_enabled {
-                bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);
-                if !bms_state.charge_enabled {
-                    writeln!(rtt, "OV reached").ok();
-                }
-                match bq769x0.current(i2c) {
-                    Ok(i) => {
-                        if i.0 < 100 {
-                            let r = bq769x0.charge(i2c, false);
-                            writeln!(rtt, "Charge finish: {:?}", r).ok();
-                            bms_state.charge_enabled = false;
-                        }
-                    },
-                    Err(_) => {}
-                }
-            } else {
-                tca9534.write_config(i2c, tca9535::tca9534::Port::empty()).ok(); // Fix glitched reset?
-                let r =     tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, config::TCA_VHCG_DIV_EN_PIN);
-                if r.is_err() {
-                    writeln!(rtt, "{}vchg tca err{}", color::RED, color::DEFAULT).ok();
-                }
-                cortex_m::asm::delay(100_000);
-                let vchg_raw = adc.read(&mut afe_io.vchg_div_pin) as Result<u32, _>;
-                let vchg_raw = vchg_raw.unwrap_or(0);
-                tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, Port::empty()).ok();
-                let vchg = (vchg_raw * 8 * 3300) / 1 / 4095;
-                writeln!(rtt, "vchg: {}mV", vchg).ok();
-                if bms_state.vchg_prev_mv != 0 {
-                    let dvchg_mv = vchg as i32 - bms_state.vchg_prev_mv as i32;
-                    if dvchg_mv > 200 {
-                        let r = bq769x0.charge(i2c, true);
-                        writeln!(rtt, "Charger plugged, en:{:?}", r).ok();
-                        bms_state.charge_enabled = true;
-                    }
-                }
-                bms_state.vchg_prev_mv = vchg;
-            }
+            bq769x0.charge(i2c, true).ok();
+            // if bms_state.charge_enabled {
+            //     bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);
+            //     if !bms_state.charge_enabled {
+            //         writeln!(rtt, "OV reached").ok();
+            //     }
+            //     match bq769x0.current(i2c) {
+            //         Ok(i) => {
+            //             if i.0 < 100 {
+            //                 let r = bq769x0.charge(i2c, false);
+            //                 writeln!(rtt, "Charge finish: {:?}", r).ok();
+            //                 bms_state.charge_enabled = false;
+            //             }
+            //         },
+            //         Err(_) => {}
+            //     }
+            // } else {
+            //     tca9534.write_config(i2c, tca9535::tca9534::Port::empty()).ok(); // Fix glitched reset?
+            //     let r =     tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, config::TCA_VHCG_DIV_EN_PIN);
+            //     if r.is_err() {
+            //         writeln!(rtt, "{}vchg tca err{}", color::RED, color::DEFAULT).ok();
+            //     }
+            //     cortex_m::asm::delay(100_000);
+            //     let vchg_raw = adc.read(&mut afe_io.vchg_div_pin) as Result<u32, _>;
+            //     let vchg_raw = vchg_raw.unwrap_or(0);
+            //     tca9534.modify_outputs(i2c, config::TCA_VHCG_DIV_EN_PIN, Port::empty()).ok();
+            //     let vchg = (vchg_raw * 8 * 3300) / 1 / 4095;
+            //     writeln!(rtt, "vchg: {}mV", vchg).ok();
+            //     if bms_state.vchg_prev_mv != 0 {
+            //         let dvchg_mv = vchg as i32 - bms_state.vchg_prev_mv as i32;
+            //         if dvchg_mv > 200 {
+            //             let r = bq769x0.charge(i2c, true);
+            //             writeln!(rtt, "Charger plugged, en:{:?}", r).ok();
+            //             bms_state.charge_enabled = true;
+            //         }
+            //     }
+            //     bms_state.vchg_prev_mv = vchg;
+            // }
             cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckCharger).ok();
         },
         BmsEvent::CheckBalancing => {
