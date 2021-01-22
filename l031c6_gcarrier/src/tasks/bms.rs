@@ -8,6 +8,9 @@ use jlink_rtt::NonBlockingOutput;
 use stm32l0xx_hal::prelude::OutputPin;
 //use mcu_helper::color;
 use stm32l0xx_hal::time::MicroSeconds;
+use mcu_helper::color;
+use bq769x0::{SCDDelay, Amperes, OCDDelay, MicroOhms, UVDelay, OVDelay};
+use bq769x0::Config as BQ769x0Config;
 
 #[derive(Debug)]
 pub struct PowerRailCommand {
@@ -21,7 +24,7 @@ pub enum BmsEvent {
     TogglePower,
     PowerOff,
     PowerOn,
-    CheckCharger,
+    CheckAfe,
     CheckBalancing,
     Halt,
     PowerRailControl(PowerRailCommand)
@@ -34,9 +37,12 @@ pub struct BmsState {
     //charge_enabled: bool,
     //vchg_prev_mv: u32,
 
-    balancing_state: BalancingState
+    balancing_state: BalancingState,
+    afe_fault_count: u8,
+    power_on_fault_count: u8
 }
 
+#[derive(Debug)]
 pub enum Error {
     AfeError(bq769x0::Error),
     DischargeFailed
@@ -84,6 +90,24 @@ impl Default for BalancingState {
     }
 }
 
+pub fn afe_init(
+    i2c: &mut config::InternalI2c,
+    bq769x0: &mut BQ769x0,
+) -> Result<bq769x0::CalculatedValues, Error> {
+    let bq769x0_config = BQ769x0Config {
+        shunt: MicroOhms(2000),
+        scd_delay: SCDDelay::_400uS,
+        scd_threshold: Amperes(100),
+        ocd_delay: OCDDelay::_640ms,
+        ocd_threshold: Amperes(50),
+        uv_delay: UVDelay::_4s,
+        uv_threshold: config::CELL_UV_THRESHOLD,
+        ov_delay: OVDelay::_4s,
+        ov_threshold: config::CELL_OV_THRESHOLD
+    };
+    bq769x0.init(i2c, &bq769x0_config).map_err(|e| Error::AfeError(e))
+}
+
 pub fn afe_discharge(
     i2c: &mut config::InternalI2c,
     bq769x0: &mut BQ769x0,
@@ -94,7 +118,7 @@ pub fn afe_discharge(
         return Ok(());
     }
     for _ in 0..10 {
-        bq769x0.sys_stat_reset(i2c)?;
+        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT)?;
         bq769x0.discharge(i2c, true)?;
         cortex_m::asm::delay(400_000);
         let stat = bq769x0.sys_stat(i2c)?;
@@ -140,14 +164,90 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
         },
         BmsEvent::PowerOn => {
             crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
-            bms_state.power_enabled = afe_discharge(i2c, bq769x0, true).is_ok(); // TODO: bb
-            writeln!(rtt, "Power enabled?: {}", bms_state.power_enabled).ok();
-            if bms_state.power_enabled {
+            let dsg_successful = afe_discharge(i2c, bq769x0, true).is_ok();
+            writeln!(rtt, "DSG successful?: {}", dsg_successful).ok();
+            if dsg_successful {
                 crate::power_block::enable_all(power_blocks);
+                bms_state.power_enabled = true;
+                bms_state.power_on_fault_count = 0;
+            } else {
+                bms_state.power_on_fault_count += 1;
+                if bms_state.power_on_fault_count > 5 {
+                    bms_state.power_enabled = false;
+                }
             }
         }
-        BmsEvent::CheckCharger => {
-            bq769x0.charge(i2c, true).ok();
+        BmsEvent::CheckAfe => {
+            let sys_stat = bq769x0.sys_stat(i2c);
+            match sys_stat {
+                Ok(_) => {},
+                Err(e) => {
+                    use bq769x0::Error;
+                    match e {
+                        Error::CRCMismatch | Error::Uninitialized | Error::I2CError | Error::VerifyError(_) => {
+                            writeln!(rtt, "{}AFE problem detected: {:?}{}", color::RED, e, color::DEFAULT).ok();
+                            afe_io.afe_wake_pin.set_high().ok();
+                            delay_ms!(clocks, 300);
+                            afe_io.afe_wake_pin.set_low().ok();
+                            match afe_init(i2c, bq769x0) {
+                                Ok(_) => {
+                                    writeln!(rtt, "AFE reinit ok").ok();
+                                    bms_state.afe_fault_count = 0;
+                                },
+                                Err(e) => {
+                                    writeln!(rtt, "AFE reinit fail: {:?}", e).ok();
+                                    bms_state.afe_fault_count += 1;
+                                    if bms_state.afe_fault_count > config::AFE_FAULT_COUNT_TO_HALT {
+                                        writeln!(rtt, "Giving up").ok();
+                                        cx.spawn.bms_event(BmsEvent::Halt).ok();
+                                    }
+                                }
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            }
+            match bq769x0.is_charge_enabled(i2c) {
+                Ok(chg) => {
+                    if !chg {
+                        match bq769x0.sys_stat(i2c) {
+                            Ok(stat) => {
+                                if stat.overvoltage_is_set() {
+                                    let v = bq769x0.voltage(i2c).unwrap_or(MilliVolts(9999));
+                                    if v < config::CELL_OV_CLEAR {
+                                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::OVERVOLTAGE).ok();
+                                    }
+                                } else {
+                                    bq769x0.charge(i2c, true).ok();
+                                }
+                            },
+                            Err(_) => {}
+                        }
+                    }
+                },
+                Err(_) => {}
+            }
+            if bms_state.power_enabled {
+                match bq769x0.sys_stat(i2c) {
+                    Ok(sys_stat) => {
+                        if sys_stat.scd_is_set() | sys_stat.ocd_is_set() {
+                            writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
+                            cx.spawn.bms_event(BmsEvent::PowerOn).ok();
+                        }
+                        if sys_stat.undervoltage_is_set() {
+                            writeln!(rtt, "{}UV detected{}", color::YELLOW, color::DEFAULT).ok();
+                            cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                        }
+                        if sys_stat.device_xready_is_set() {
+                            writeln!(rtt, "{}Xready detected, clearing{}", color::RED, color::DEFAULT).ok();
+                            bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
+                        }
+                    },
+                    Err(_) => {}
+                }
+            }
+
             // if bms_state.charge_enabled {
             //     bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);
             //     if !bms_state.charge_enabled {
@@ -185,7 +285,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             //     }
             //     bms_state.vchg_prev_mv = vchg;
             // }
-            cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckCharger).ok();
+            cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckAfe).ok();
         },
         BmsEvent::CheckBalancing => {
             let _ = check_balancing(i2c, bq769x0, &mut bms_state.balancing_state, rtt);

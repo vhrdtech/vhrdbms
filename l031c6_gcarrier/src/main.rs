@@ -35,7 +35,7 @@ use mcu_helper::tim_cyccnt::{U32Ext};
 use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin};
 use crate::power_block::PowerBlockId;
 
-use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode};
+use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode, FiltersConfigBuffer0};
 use bq769x0::BQ769x0;
 use tca9535::tca9534::Tca9534;
 
@@ -53,6 +53,7 @@ const APP: () = {
         mcp25625: config::Mcp25625Instance,
         mcp25625_irq: config::Mcp25625Irq,
         can_tx: config::CanTX,
+        can_rx: config::CanRX,
         i2c: config::InternalI2c,
         bq76920: BQ769x0,
         power_blocks: config::PowerBlocksMap,
@@ -233,6 +234,12 @@ const APP: () = {
         let one_cp: u32 = 1000; // tweak to be approx. one spi clock cycle
         cortex_m::asm::delay(100_000);
         let mut mcp25625 = MCP25625::new(spi, mcp_cs, one_cp);
+        let filters_buffer0 = FiltersConfigBuffer0 {
+            mask: vhrdcan::EXTENDED_ID_ALL_BITS,
+            filter0: config::SOFTOFF_NOTIFY_FRAME_ID,
+            filter1: None
+        };
+        let filters_config = FiltersConfig::Filter(filters_buffer0, None);
         let mcp_config = MCP25625Config {
             brp: 0, // Fosc=16MHz
             prop_seg: 3,
@@ -240,7 +247,7 @@ const APP: () = {
             ph_seg2: 2,
             sync_jump_width: 2,
             rollover_to_buffer1: true,
-            filters_config: FiltersConfig::ReceiveAll,
+            filters_config,
             operation_mode: McpOperationMode::Normal
         };
         let r = mcp25625.apply_config(mcp_config);
@@ -248,12 +255,11 @@ const APP: () = {
         mcp25625.enable_interrupts(0b0001_1111);
         // Queues
         let can_tx = config::CanTX::new();
+        let can_rx = config::CanRX::new();
 
         // Internal I2C to AFE and Gauge
         //use crc_any::CRCu8;
         use bq769x0::BQ769x0;
-        use bq769x0::{SCDDelay, Amperes, OCDDelay, MilliVolts, MicroOhms, UVDelay, OVDelay};
-        use bq769x0::Config as BQ769x0Config;
         let scl = gpioa.pa9.into_open_drain_output();
         let sda = gpioa.pa10.into_open_drain_output();
         cfg_if! {
@@ -268,18 +274,7 @@ const APP: () = {
         //let mut crc8 = CRCu8::crc8();
         // Prepare bq76920 config
         let mut bq76920 = BQ769x0::new(0x08);
-        let bq769x0_config = BQ769x0Config {
-            shunt: MicroOhms(2000),
-            scd_delay: SCDDelay::_400uS,
-            scd_threshold: Amperes(100),
-            ocd_delay: OCDDelay::_640ms,
-            ocd_threshold: Amperes(50),
-            uv_delay: UVDelay::_4s,
-            uv_threshold: MilliVolts(3100),
-            ov_delay: OVDelay::_4s,
-            ov_threshold: MilliVolts(4250)
-        };
-        match bq76920.init(&mut i2c, &bq769x0_config) {
+        match crate::tasks::bms::afe_init(&mut i2c, &mut bq76920) {
             Ok(_actual) => {
                 let _ = writeln!(rtt, "afe init ok");
                 //let _ = writeln!(rtt, "adc gain:{}uV/LSB offset:{}mV", bq76920.adc_gain(), bq76920.adc_offset());
@@ -298,7 +293,7 @@ const APP: () = {
         let _ = writeln!(rtt, "tca9534: {}", r.is_ok());
         let _ = tca9534.write_outputs(&mut i2c, tca9535::tca9534::Port::empty());
 
-        cx.spawn.bms_event(tasks::bms::BmsEvent::CheckCharger).unwrap();
+        cx.spawn.bms_event(tasks::bms::BmsEvent::CheckAfe).unwrap();
         cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
         cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
         cx.spawn.blinker().unwrap();
@@ -317,6 +312,7 @@ const APP: () = {
             mcp25625,
             mcp25625_irq,
             can_tx,
+            can_rx,
             i2c,
             bq76920,
             power_blocks,
@@ -401,6 +397,7 @@ const APP: () = {
             mcp25625,
             mcp25625_irq,
             can_tx,
+            can_rx,
             rtt
         ],
         spawn = [button_event]

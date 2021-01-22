@@ -19,7 +19,8 @@ pub type Mcp25625Cs = PA4<Output<PushPull>>;
 pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<hal::pac::SPI1, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
 pub type Mcp25625Irq = PA1<Input<PullDown>>;
 pub type CanTX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U32>;
-pub const CAN_IRQ: Interrupt = Interrupt::EXTI0_1;
+pub type CanRX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U32>;
+pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI0_1;
 
 // DCDCs and Switches
 // Make sure size is enough, since it is not easily possible to check that unfortunately
@@ -48,6 +49,12 @@ pub type ButtonPin = PA11<Input<Floating>>;
 pub const BUTTON_SHORT_PRESS_MS: u32 = 200;
 pub const BUTTON_LONG_PRESS_MS: u32 = 2000;
 
+// Afe
+pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(3100);
+pub const CELL_OV_THRESHOLD: MilliVolts = MilliVolts(4200);
+pub const CELL_OV_CLEAR: MilliVolts = MilliVolts(4100);
+pub const AFE_FAULT_COUNT_TO_HALT: u8 = 20;
+
 // Afe IO
 pub type AfeWakePin = PA12<Output<PushPull>>;
 pub type VchgDivPin = PA2<Analog>;
@@ -60,9 +67,9 @@ pub const BALANCE_START_DELTA_MV: u32 = 3;
 // CanBus Protocol
 use stm32l0xx_hal::pac::Interrupt;
 use vhrdcan::FrameId;
+use bq769x0::MilliVolts;
 
 pub const HEARTBEAT_INTERVAL_MS: u32 = 1000;
-pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI0_1;
 
 // Soft off
 pub const SOFTOFF_TIMEOUT_MS: u32 = 10_000;

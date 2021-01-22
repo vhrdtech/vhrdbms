@@ -115,22 +115,8 @@ fn afe_command(
                 "dsg" => {
                     match one_of(part_cmd, &["off", "on"], fmt) {
                         Some(offon) => {
-                            for _ in 0..10 {
-                                let r = bq769x0.sys_stat_reset(i2c);
-                                writeln!(fmt, "st_res: {:?}", r).ok();
-                                let _ = bq769x0.discharge(i2c, offon != 0);
-                                cortex_m::asm::delay(400_000);
-                                match bq769x0.sys_stat(i2c) {
-                                    Ok(stat) => {
-                                        if !stat.scd_is_set() {
-                                            let _ = writeln!(fmt, "no scd, done");
-                                            break;
-                                        }
-                                    }
-                                    Err(_) => {}
-                                }
-                                cortex_m::asm::delay(50_000);
-                            }
+                            let r = crate::tasks::bms::afe_discharge(i2c, bq769x0, offon != 0);
+                            writeln!(fmt, "DSG en: {:?}", r).ok();
                         },
                         None => {}
                     }
@@ -153,7 +139,7 @@ fn afe_command(
                                 let stat = bq769x0.sys_stat(i2c);
                                 writeln!(fmt, "{:?}", stat).ok();
                             } else if showreset == 1 {
-                                let r = bq769x0.sys_stat_reset(i2c);
+                                let r = bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::ALL);
                                 writeln!(fmt, "SR: {:?}", r).ok();
                             }
                         },
