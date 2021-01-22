@@ -59,6 +59,7 @@ pub const BALANCE_START_DELTA_MV: u32 = 3;
 
 // CanBus Protocol
 use stm32l0xx_hal::pac::Interrupt;
+use vhrdcan::FrameId;
 
 pub const HEARTBEAT_INTERVAL_MS: u32 = 1000;
 pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI0_1;
@@ -66,3 +67,4 @@ pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI0_1;
 // Soft off
 pub const SOFTOFF_TIMEOUT_MS: u32 = 10_000;
 pub const SOFTOFF_NOTIFY_INTERVAL_MS: u32 = 1_000;
+pub const SOFTOFF_NOTIFY_FRAME_ID: FrameId = FrameId::new_extended(350).unwrap();

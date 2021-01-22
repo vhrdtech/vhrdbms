@@ -14,7 +14,7 @@ impl Default for State {
 }
 
 fn send_notify(can_tx: &mut config::CanTX) {
-    let frame = can_tx.pool.new_frame(FrameId::new_extended(0x0).unwrap(), r#"BMS"#.as_bytes()).unwrap();
+    let frame = can_tx.pool.new_frame(config::SOFTOFF_NOTIFY_FRAME_ID, r#"BMS"#.as_bytes()).unwrap();
     let _ = can_tx.heap.push(frame);
     rtic::pend(config::CAN_IRQ);
 }

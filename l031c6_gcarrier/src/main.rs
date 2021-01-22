@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 #![feature(alloc_error_handler)]
+#![feature(const_option)]
 
 #[macro_use]
 mod util;
@@ -34,7 +35,7 @@ use mcu_helper::tim_cyccnt::{U32Ext};
 use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin};
 use crate::power_block::PowerBlockId;
 
-use mcp25625::{MCP25625, MCP25625Config};
+use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode};
 use bq769x0::BQ769x0;
 use tca9535::tca9534::Tca9534;
 
@@ -237,16 +238,13 @@ const APP: () = {
             prop_seg: 3,
             ph_seg1: 2,
             ph_seg2: 2,
-            sync_jump_width: 2
+            sync_jump_width: 2,
+            rollover_to_buffer1: true,
+            filters_config: FiltersConfig::ReceiveAll,
+            operation_mode: McpOperationMode::Normal
         };
         let r = mcp25625.apply_config(mcp_config);
-        writeln!(rtt, "mcp: {:?}", r).ok();
-        let _ = mcp25625.reset_interrupt_flags(0);
-        let _ = mcp25625.reset_error_flags();
-        let _ = mcp25625.rx_configure(true, false);
-        let _ = mcp25625.masks_rxall();
-        let r = mcp25625.change_mode(mcp25625::McpOperationMode::Normal);
-        writeln!(rtt, "mcp->normal: {:?}", r).ok();
+        writeln!(rtt, "mcp25625 config: {:?}", r).ok();
         mcp25625.enable_interrupts(0b0001_1111);
         // Queues
         let can_tx = config::CanTX::new();
