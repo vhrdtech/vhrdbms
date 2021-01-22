@@ -1,12 +1,20 @@
 MEMORY
 {
   FLASH : ORIGIN = 0x08000000, LENGTH = 64K
+  RAM : ORIGIN = 0x20000000, LENGTH = 8K
+}
+
+/*
+MEMORY
+{
+  FLASH : ORIGIN = 0x08000000, LENGTH = 64K
   PANIC_INFO_RAM : ORIGIN = 0x20000000, LENGTH = 512
   RAM : ORIGIN = 0x20000000 + LENGTH(PANIC_INFO_RAM), LENGTH = 8K - LENGTH(PANIC_INFO_RAM)
 }
 
 _panic_info_ram_start = ORIGIN(PANIC_INFO_RAM);
 _panic_info_ram_end = _panic_info_ram_start + LENGTH(PANIC_INFO_RAM);
+*/
 
 /* This is where the call stack will be allocated. */
 /* The stack is of the full descending type. */

@@ -74,7 +74,7 @@ const APP: () = {
         // Initialize allocator
         // Used only in init to store PowerBlock trait objects in array
         let start = cortex_m_rt::heap_start() as usize;
-        let size = 1024; // in bytes
+        let size = 512; // in bytes
         unsafe { ALLOCATOR.init(start, size) }
 
         // let core/*: cortex_m::Peripherals */= cx.core;
@@ -248,6 +248,7 @@ const APP: () = {
             sync_jump_width: 2,
             rollover_to_buffer1: true,
             filters_config,
+            //filters_config: FiltersConfig::ReceiveAll,
             operation_mode: McpOperationMode::Normal
         };
         let r = mcp25625.apply_config(mcp_config);
@@ -379,6 +380,19 @@ const APP: () = {
     #[task(
         resources = [
             &clocks,
+            can_rx,
+            rtt
+        ],
+        spawn = [bms_event],
+        schedule = []
+    )]
+    fn can_rx(cx: can_rx::Context) {
+        tasks::api::can_rx(cx);
+    }
+
+    #[task(
+        resources = [
+            &clocks,
             can_tx,
             softoff_state,
         ],
@@ -400,7 +414,7 @@ const APP: () = {
             can_rx,
             rtt
         ],
-        spawn = [button_event]
+        spawn = [can_rx]
     )]
     fn canctrl_irq(cx: canctrl_irq::Context) {
         tasks::canbus::canctrl_irq(cx);

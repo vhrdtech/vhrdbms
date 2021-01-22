@@ -164,8 +164,9 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
         },
         BmsEvent::PowerOn => {
             crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
-            let dsg_successful = afe_discharge(i2c, bq769x0, true).is_ok();
-            writeln!(rtt, "DSG successful?: {}", dsg_successful).ok();
+            let r = afe_discharge(i2c, bq769x0, true);
+            let dsg_successful = r.is_ok();
+            writeln!(rtt, "DSG successful?: {:?}", r).ok();
             if dsg_successful {
                 crate::power_block::enable_all(power_blocks);
                 bms_state.power_enabled = true;
