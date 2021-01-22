@@ -19,6 +19,7 @@ pub type Mcp25625Cs = PA4<Output<PushPull>>;
 pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<hal::pac::SPI1, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
 pub type Mcp25625Irq = PA1<Input<PullDown>>;
 pub type CanTX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U32>;
+pub const CAN_IRQ: Interrupt = Interrupt::EXTI0_1;
 
 // DCDCs and Switches
 // Make sure size is enough, since it is not easily possible to check that unfortunately
@@ -40,10 +41,11 @@ use stm32l0xx_hal::gpio::{Input, Floating, PullDown};
 pub const TCA_TMS_TDO_PIN: Port = Port::P00;
 pub const TCA_MXM_ON_OFF_PIN: Port = Port::P01;
 pub const TCA_MXM_BOOT_SRC_PIN: Port = Port::P02;
-pub const TCA_VHCG_DIV_EN_PIN: Port = Port::P03; // Do not forgot to solder on rev.B boards
+// pub const TCA_VHCG_DIV_EN_PIN: Port = Port::P03; // Do not forgot to solder on rev.B boards
 
 // Power button
 pub type ButtonPin = PA11<Input<Floating>>;
+pub const BUTTON_SHORT_PRESS_MS: u32 = 200;
 pub const BUTTON_LONG_PRESS_MS: u32 = 2000;
 
 // Afe IO
@@ -60,3 +62,7 @@ use stm32l0xx_hal::pac::Interrupt;
 
 pub const HEARTBEAT_INTERVAL_MS: u32 = 1000;
 pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI0_1;
+
+// Soft off
+pub const SOFTOFF_TIMEOUT_MS: u32 = 10_000;
+pub const SOFTOFF_NOTIFY_INTERVAL_MS: u32 = 1_000;

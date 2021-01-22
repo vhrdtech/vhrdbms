@@ -58,7 +58,8 @@ const APP: () = {
         tca9534: Tca9534<config::InternalI2c>,
         exti: Exti,
         button: config::ButtonPin,
-        button_state: tasks::button::ButtonState
+        button_state: tasks::button::ButtonState,
+        softoff_state: tasks::softoff::State
     }
 
     #[init(
@@ -173,7 +174,7 @@ const APP: () = {
 
         // power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).expect("I1").enable();
         // power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
-        power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
+        // power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
 
         // Enable IRQ on power button input
         let button = gpioa.pa11.into_floating_input();
@@ -244,7 +245,7 @@ const APP: () = {
         let _ = mcp25625.reset_error_flags();
         let _ = mcp25625.rx_configure(true, false);
         let _ = mcp25625.masks_rxall();
-        let r = mcp25625.change_mode(mcp25625::McpOperationMode::Loopback);
+        let r = mcp25625.change_mode(mcp25625::McpOperationMode::Normal);
         writeln!(rtt, "mcp->normal: {:?}", r).ok();
         mcp25625.enable_interrupts(0b0001_1111);
         // Queues
@@ -276,7 +277,7 @@ const APP: () = {
             ocd_delay: OCDDelay::_640ms,
             ocd_threshold: Amperes(50),
             uv_delay: UVDelay::_4s,
-            uv_threshold: MilliVolts(3050),
+            uv_threshold: MilliVolts(3100),
             ov_delay: OVDelay::_4s,
             ov_threshold: MilliVolts(4250)
         };
@@ -306,6 +307,7 @@ const APP: () = {
 
         let bms_state = tasks::bms::BmsState::default();
         let button_state = tasks::button::ButtonState::default();
+        let softoff_state = tasks::softoff::State::default();
 
         init::LateResources {
             clocks,
@@ -324,6 +326,7 @@ const APP: () = {
             exti,
             button,
             button_state,
+            softoff_state
         }
     }
 
@@ -342,6 +345,10 @@ const APP: () = {
         capacity = 8,
         schedule = [
             bms_event,
+        ],
+        spawn = [
+            bms_event,
+            softoff
         ]
     )]
     fn bms_event(cx: bms_event::Context, e: tasks::bms::BmsEvent) {
@@ -373,6 +380,19 @@ const APP: () = {
     )]
     fn api(cx: api::Context, e: tasks::api::Event) {
         tasks::api::api(cx, e);
+    }
+
+    #[task(
+        resources = [
+            &clocks,
+            can_tx,
+            softoff_state,
+        ],
+        schedule = [softoff],
+        spawn = [bms_event]
+    )]
+    fn softoff(cx: softoff::Context) {
+        tasks::softoff::softoff(cx);
     }
 
     #[task(

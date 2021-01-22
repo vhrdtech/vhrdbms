@@ -5,3 +5,4 @@ pub mod button;
 pub mod canbus;
 pub mod bms;
 pub mod api;
+pub mod softoff;

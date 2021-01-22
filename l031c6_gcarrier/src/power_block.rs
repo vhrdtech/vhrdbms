@@ -2,7 +2,7 @@ use hash32::{Hash, Hasher};
 use core::convert::TryFrom;
 use crate::config;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum PowerBlockId {
     DcDc5V0Bms,
     DcDc5V0Hc,
@@ -66,6 +66,7 @@ impl Into<&'static str> for PowerBlockId {
 }
 
 pub fn enable_all(power_blocks: &mut config::PowerBlocksMap,) {
+    power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
     power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).expect("I1").enable();
     power_blocks.get_mut(&PowerBlockId::DcDc5V0Hc).expect("I1").enable();
     power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
@@ -83,4 +84,5 @@ pub fn disable_all(power_blocks: &mut config::PowerBlocksMap) {
     power_blocks.get_mut(&PowerBlockId::Switch5V0Usb).expect("I1").disable();
     power_blocks.get_mut(&PowerBlockId::Switch5V0Flex).expect("I1").disable();
     power_blocks.get_mut(&PowerBlockId::DcDc3V8Imx).expect("I1").disable();
+    power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").disable();
 }

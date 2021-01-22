@@ -1,4 +1,4 @@
-use core::fmt::Write;
+// use core::fmt::Write;
 use stm32l0xx_hal::exti::{Exti, GpioLine, ExtiLine};
 use mcp25625::{McpReceiveBuffer, McpPriority, };
 use crate::config;
