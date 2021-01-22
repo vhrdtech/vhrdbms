@@ -2,26 +2,37 @@ use crate::{config, tasks};
 use bq769x0::{BQ769x0, MilliVolts};
 use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
-use tca9535::tca9534::{Tca9534, Port};
-use crate::hal::prelude::_embedded_hal_adc_OneShot;
+use tca9535::tca9534::{Tca9534};
+//use crate::hal::prelude::_embedded_hal_adc_OneShot;
 use jlink_rtt::NonBlockingOutput;
 use stm32l0xx_hal::prelude::OutputPin;
-use mcu_helper::color;
+//use mcu_helper::color;
+use stm32l0xx_hal::time::MicroSeconds;
+
+#[derive(Debug)]
+pub struct PowerRailCommand {
+    pub rail: crate::PowerBlockId,
+    pub powered: bool,
+    pub delay_after: Option<MicroSeconds>,
+}
 
 #[derive(Debug)]
 pub enum BmsEvent {
     TogglePower,
+    PowerOff,
+    PowerOn,
     CheckCharger,
     CheckBalancing,
     Halt,
+    PowerRailControl(PowerRailCommand)
 }
 
 #[derive(Default)]
 pub struct BmsState {
     power_enabled: bool,
 
-    charge_enabled: bool,
-    vchg_prev_mv: u32,
+    //charge_enabled: bool,
+    //vchg_prev_mv: u32,
 
     balancing_state: BalancingState
 }
@@ -105,25 +116,36 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let power_blocks = cx.resources.power_blocks;
     let tca9534: &mut Tca9534<config::InternalI2c> = cx.resources.tca9534;
     let clocks = cx.resources.clocks;
-    let adc = cx.resources.adc;
+    let _adc = cx.resources.adc;
     let afe_io: &mut AfeIo = cx.resources.afe_io;
 
     match e {
         BmsEvent::TogglePower => {
             if bms_state.power_enabled {
-                crate::power_block::disable_all(power_blocks);
-                let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
-                bms_state.power_enabled = false;
-                writeln!(rtt, "Power disabled").ok();
-            } else {
-                crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
-                bms_state.power_enabled = afe_discharge(i2c, bq769x0, true).is_ok(); // TODO: bb
-                writeln!(rtt, "Power enabled?: {}", bms_state.power_enabled).ok();
-                if bms_state.power_enabled {
-                    crate::power_block::enable_all(power_blocks);
+                if config::SOFTOFF_TIMEOUT_MS == 0 {
+                    cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                } else {
+                    writeln!(rtt, "Softoff spawned").ok();
+                    cx.spawn.softoff().ok();
                 }
+            } else {
+                cx.spawn.bms_event(BmsEvent::PowerOn).ok();
             }
         },
+        BmsEvent::PowerOff => {
+            crate::power_block::disable_all(power_blocks);
+            let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
+            bms_state.power_enabled = false;
+            writeln!(rtt, "Power disabled").ok();
+        },
+        BmsEvent::PowerOn => {
+            crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
+            bms_state.power_enabled = afe_discharge(i2c, bq769x0, true).is_ok(); // TODO: bb
+            writeln!(rtt, "Power enabled?: {}", bms_state.power_enabled).ok();
+            if bms_state.power_enabled {
+                crate::power_block::enable_all(power_blocks);
+            }
+        }
         BmsEvent::CheckCharger => {
             bq769x0.charge(i2c, true).ok();
             // if bms_state.charge_enabled {
@@ -178,6 +200,23 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 Err(e) => {
                     writeln!(rtt, "Halt: {:?}", e).ok();
                 }
+            }
+        },
+        BmsEvent::PowerRailControl(cmd) => {
+            if !bms_state.power_enabled {
+                return;
+            }
+            let pb = power_blocks.get_mut(&cmd.rail).expect("I1");
+            if cmd.powered {
+                pb.enable();
+            } else {
+                pb.disable();
+            }
+            match cmd.delay_after {
+                Some(delay) => {
+                    cortex_m::asm::delay(us2cycles_raw!(clocks, delay.0) as u32);
+                },
+                None => {}
             }
         }
     }
