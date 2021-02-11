@@ -161,6 +161,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
             bms_state.power_enabled = false;
             writeln!(rtt, "Power disabled").ok();
+            cx.spawn.blinker(crate::tasks::led::Event::OffMode).ok();
         },
         BmsEvent::PowerOn => {
             crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
@@ -171,6 +172,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 crate::power_block::enable_all(power_blocks);
                 bms_state.power_enabled = true;
                 bms_state.power_on_fault_count = 0;
+                cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
             } else {
                 bms_state.power_on_fault_count += 1;
                 if bms_state.power_on_fault_count > 5 {
@@ -215,12 +217,15 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                         match bq769x0.sys_stat(i2c) {
                             Ok(stat) => {
                                 if stat.overvoltage_is_set() {
-                                    let v = bq769x0.voltage(i2c).unwrap_or(MilliVolts(9999));
-                                    if v < config::CELL_OV_CLEAR {
+                                    let sufficiently_charged_cells = find_cells(i2c, bq769x0, |cell, _| {
+                                        cell > config::CELL_OV_CLEAR
+                                    }).unwrap_or(0);
+                                    if sufficiently_charged_cells == 0 { // when highly unbalanced, this check is better than total pack value.
                                         bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::OVERVOLTAGE).ok();
                                     }
                                 } else {
                                     bq769x0.charge(i2c, true).ok();
+                                    bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
                                 }
                             },
                             Err(_) => {}
@@ -229,24 +234,27 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 },
                 Err(_) => {}
             }
-            if bms_state.power_enabled {
-                match bq769x0.sys_stat(i2c) {
-                    Ok(sys_stat) => {
-                        if sys_stat.scd_is_set() | sys_stat.ocd_is_set() {
-                            writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
+            match bq769x0.sys_stat(i2c) {
+                Ok(sys_stat) => {
+                    if sys_stat.scd_is_set() | sys_stat.ocd_is_set() {
+                        writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
+                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT).ok();
+                        if bms_state.power_enabled {
                             cx.spawn.bms_event(BmsEvent::PowerOn).ok();
                         }
-                        if sys_stat.undervoltage_is_set() {
-                            writeln!(rtt, "{}UV detected{}", color::YELLOW, color::DEFAULT).ok();
-                            cx.spawn.bms_event(BmsEvent::PowerOff).ok();
-                        }
-                        if sys_stat.device_xready_is_set() {
-                            writeln!(rtt, "{}Xready detected, clearing{}", color::RED, color::DEFAULT).ok();
-                            bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
-                        }
-                    },
-                    Err(_) => {}
-                }
+                    }
+                    if sys_stat.undervoltage_is_set() {
+                        writeln!(rtt, "{}UV detected{}", color::YELLOW, color::DEFAULT).ok();
+                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
+                        cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                    }
+                    if sys_stat.device_xready_is_set() {
+                        writeln!(rtt, "{}Xready detected, clearing{}", color::RED, color::DEFAULT).ok();
+                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
+                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
+                    }
+                },
+                Err(_) => {}
             }
 
             // if bms_state.charge_enabled {
@@ -327,17 +335,15 @@ fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
     i2c: &mut config::InternalI2c,
     bq769x0: &mut BQ769x0,
     f: F
-) -> Result<(u16, u16), Error> {
+) -> Result<u16, Error> {
     let cells = bq769x0.cell_voltages(i2c)?;
     let low_cell = *cells.iter().min().unwrap();
-    let unbalanced_cells = cells
+    let cells = cells
         .iter()
         .map(|cell| f(*cell, low_cell))
         .enumerate().map(|(i, c)| (c as u16) << i)
         .fold(0u16, |acc, cell_mask| acc | cell_mask);
-    let phase_1 = unbalanced_cells & 0b00101010_10101010;
-    let phase_2 = unbalanced_cells & 0b01010101_01010101;
-    Ok((phase_1, phase_2))
+    Ok(cells)
 }
 
 fn check_balancing(
@@ -351,6 +357,7 @@ fn check_balancing(
             let balance_phases = find_cells(i2c, bq769x0, |cell, low_cell| {
                 (cell.0 - low_cell.0) > config::BALANCE_START_DELTA_MV
             })?;
+            let balance_phases = (balance_phases & 0b00101010_10101010, balance_phases & 0b01010101_01010101);
             if balance_phases.0 != 0 || balance_phases.1 != 0 {
                 writeln!(rtt, "CheckStart {:05b} {:05b}", balance_phases.0, balance_phases.1).ok();
                 state.phase1 = balance_phases.0;
