@@ -1,3 +1,4 @@
+pub mod init;
 pub mod idle;
 #[cfg(feature = "cli")]
 mod cli;

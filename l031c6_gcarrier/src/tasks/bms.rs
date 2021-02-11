@@ -11,10 +11,11 @@ use stm32l0xx_hal::time::MicroSeconds;
 use mcu_helper::color;
 use bq769x0::{SCDDelay, Amperes, OCDDelay, MicroOhms, UVDelay, OVDelay};
 use bq769x0::Config as BQ769x0Config;
+use crate::power_block::PowerBlockId;
 
 #[derive(Debug)]
 pub struct PowerRailCommand {
-    pub rail: crate::PowerBlockId,
+    pub rail: PowerBlockId,
     pub powered: bool,
     pub delay_after: Option<MicroSeconds>,
 }
