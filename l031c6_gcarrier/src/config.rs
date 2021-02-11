@@ -48,11 +48,12 @@ pub const TCA_MXM_BOOT_SRC_PIN: Port = Port::P02;
 pub type ButtonPin = PA11<Input<Floating>>;
 pub const BUTTON_SHORT_PRESS_MS: u32 = 200;
 pub const BUTTON_LONG_PRESS_MS: u32 = 2000;
+pub const BUTTON_IRQ: Interrupt = Interrupt::EXTI4_15; // keep in sync with button task!
 
 // Afe
 pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(3100);
 pub const CELL_OV_THRESHOLD: MilliVolts = MilliVolts(4200);
-pub const CELL_OV_CLEAR: MilliVolts = MilliVolts(4100);
+pub const CELL_OV_CLEAR: MilliVolts = MilliVolts(3900);
 pub const AFE_FAULT_COUNT_TO_HALT: u8 = 20;
 
 // Afe IO
@@ -72,6 +73,9 @@ use bq769x0::MilliVolts;
 pub const HEARTBEAT_INTERVAL_MS: u32 = 1000;
 
 // Soft off
+#[cfg(feature = "softoff")]
 pub const SOFTOFF_TIMEOUT_MS: u32 = 10_000;
+#[cfg(not(feature = "softoff"))]
+pub const SOFTOFF_TIMEOUT_MS: u32 = 0;
 pub const SOFTOFF_NOTIFY_INTERVAL_MS: u32 = 1_000;
 pub const SOFTOFF_NOTIFY_FRAME_ID: FrameId = FrameId::new_extended(350).unwrap();

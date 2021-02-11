@@ -6,3 +6,4 @@ pub mod canbus;
 pub mod bms;
 pub mod api;
 pub mod softoff;
+pub mod led;

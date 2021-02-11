@@ -45,6 +45,7 @@ use cfg_if::cfg_if;
 const APP: () = {
     struct Resources {
         clocks: hal::rcc::Clocks,
+        watchdog: IndependedWatchdog,
         bms_state: tasks::bms::BmsState,
         afe_io: tasks::bms::AfeIo,
         adc: Adc<hal::adc::Ready>,
@@ -65,32 +66,39 @@ const APP: () = {
     }
 
     #[init(
-        spawn = [bms_event, api, blinker]
+        spawn = [bms_event, api, blinker, watchdog]
     )]
     fn init(cx: init::Context) -> init::LateResources {
         let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
         writeln!(rtt, "{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")).ok();
 
-        // Initialize allocator
-        // Used only in init to store PowerBlock trait objects in array
-        let start = cortex_m_rt::heap_start() as usize;
-        let size = 512; // in bytes
-        unsafe { ALLOCATOR.init(start, size) }
-
-        // let core/*: cortex_m::Peripherals */= cx.core;
+        let core/*: cortex_m::Peripherals */= cx.core;
         let device: hal::pac::Peripherals = cx.device;
+        let mut watchdog = device.IWDG.watchdog();
+        //watchdog.start(1000.ms()); 1s maximum, /0 otherwise
+        watchdog.set_config(5, 4095); // 5->38?kHz/128 approx 16s
+        watchdog.feed();
 
         let rcc = device.RCC;//.constrain();
         let mut rcc = rcc.freeze(hal::rcc::Config::msi(MSIRange::Range5)); // Range5 = 2.097MHz
         let clocks = rcc.clocks;
         let mut syscfg = SYSCFG::new(device.SYSCFG, &mut rcc);
         let mut exti = Exti::new(device.EXTI);
+        let mut scb   = core.SCB;
+        let mut pwr = PWR::new(device.PWR, &mut rcc);
 
         let gpioa = device.GPIOA.split(&mut rcc);
         let gpiob = device.GPIOB.split(&mut rcc);
         let gpioc = device.GPIOC.split(&mut rcc);
+
+        unsafe {
+            let device = Peripherals::steal();
+            device.RCC.csr.modify(|_, w| w.rtcsel().bits(0b00).rtcen().clear_bit().lseon().clear_bit());
+        }
+
         let mut status_led = gpioc.pc14.into_push_pull_output();
-        status_led.set_low().ok();
+        status_led.set_high().ok();
+        cortex_m::asm::delay(ms2cycles_raw!(clocks, 10));
 
         // Power switches and DC-DCs
         use PowerBlockType::*;
@@ -100,6 +108,31 @@ const APP: () = {
         // BMS Low Iq DC-DC
         let mut dcdc_5v0_bms_en = gpioc.pc13.into_push_pull_output();
         dcdc_5v0_bms_en.set_high().ok();
+
+        // Go back to standby mode if button is not pressed (woken by watchdog)
+        let button = gpioa.pa11.into_floating_input();
+        // if button.is_high().unwrap() {
+        //     watchdog.feed();
+        //     writeln!(rtt, "Back to sleep").ok();
+        //     pwr.standby_mode(&mut scb).enter();
+        // }
+
+        // Initialize RTC, this date will only be used if RTC is not yet initialised
+        // let instant = Instant::new()
+        //     .set_year(21)
+        //     .set_month(1)
+        //     .set_day(29)
+        //     .set_hour(0)
+        //     .set_minute(0)
+        //     .set_second(0);
+        // let _rtc = RTC::new(device.RTC, &mut rcc, &mut pwr, instant);
+
+        // Initialize allocator
+        // Used only in init to store PowerBlock trait objects in array
+        let start = cortex_m_rt::heap_start() as usize;
+        let size = 512; // in bytes
+        unsafe { ALLOCATOR.init(start, size) }
+
         // let mut pb_5v0_bms: PowerBlock<_, DummyInputPin> = PowerBlock::new(
         //     DcDc, dcdc_5v0_bms_en, None
         // );
@@ -179,7 +212,6 @@ const APP: () = {
         // power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
 
         // Enable IRQ on power button input
-        let button = gpioa.pa11.into_floating_input();
         let button_line = GpioLine::from_raw_line(button.pin_number()).unwrap();
         exti.listen_gpio(&mut syscfg, button.port(), button_line, TriggerEdge::Falling);
 
@@ -237,7 +269,7 @@ const APP: () = {
         let filters_buffer0 = FiltersConfigBuffer0 {
             mask: vhrdcan::EXTENDED_ID_ALL_BITS,
             filter0: config::SOFTOFF_NOTIFY_FRAME_ID,
-            filter1: None
+            filter1: Some(FrameId::new_standard(0x123).unwrap())
         };
         let filters_config = FiltersConfig::Filter(filters_buffer0, None);
         let mcp_config = MCP25625Config {
@@ -294,10 +326,12 @@ const APP: () = {
         let _ = writeln!(rtt, "tca9534: {}", r.is_ok());
         let _ = tca9534.write_outputs(&mut i2c, tca9535::tca9534::Port::empty());
 
+        cx.spawn.watchdog().unwrap();
         cx.spawn.bms_event(tasks::bms::BmsEvent::CheckAfe).unwrap();
         cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
         cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
-        cx.spawn.blinker().unwrap();
+        cx.spawn.blinker(tasks::led::Event::Toggle).unwrap();
+        rtic::pend(config::BUTTON_IRQ); // if we got to this point, button was pressed
 
         let bms_state = tasks::bms::BmsState::default();
         let button_state = tasks::button::ButtonState::default();
@@ -305,6 +339,7 @@ const APP: () = {
 
         init::LateResources {
             clocks,
+            watchdog,
             bms_state,
             afe_io,
             adc,
@@ -343,7 +378,8 @@ const APP: () = {
         ],
         spawn = [
             bms_event,
-            softoff
+            softoff,
+            blinker
         ]
     )]
     fn bms_event(cx: bms_event::Context, e: tasks::bms::BmsEvent) {
@@ -351,19 +387,35 @@ const APP: () = {
     }
 
     #[task(
+        capacity = 3,
         resources = [
             &clocks,
             status_led,
-            can_tx
+            can_tx,
+            rtt
         ],
         schedule = [
             blinker,
         ]
     )]
-    fn blinker(cx: blinker::Context) {
-        cx.resources.status_led.toggle().ok();
-        let schedule_at = cx.scheduled + 2_000_000.cycles();
-        cx.schedule.blinker(schedule_at).ok();
+    fn blinker(cx: blinker::Context, e: tasks::led::Event) {
+        static mut STATE: bool = false;
+        tasks::led::blinker(cx, e, STATE);
+    }
+
+    #[task(
+        resources = [
+            &clocks,
+            watchdog,
+        ],
+        schedule = [
+            watchdog,
+        ]
+    )]
+    fn watchdog(cx: watchdog::Context) {
+        let schedule_at = cx.scheduled + ms2cycles!(cx.resources.clocks, 1000);
+        cx.schedule.watchdog(schedule_at).ok();
+        cx.resources.watchdog.feed();
     }
 
     #[task(
@@ -476,9 +528,17 @@ use core::panic::PanicInfo;
 use stm32l0xx_hal::exti::{GpioLine, ExtiLine, TriggerEdge, Exti};
 use stm32l0xx_hal::syscfg::SYSCFG;
 use stm32l0xx_hal::adc::{Precision, SampleTime};
+use vhrdcan::FrameId;
+use stm32l0xx_hal::watchdog::IndependedWatchdog;
+use stm32l0xx_hal::pwr::PWR;
+use stm32l0xx_hal::rtc::{Instant, RTC};
+use stm32l0xx_hal::pac::Peripherals;
 
 #[inline(never)]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    cortex_m::asm::delay(6_000_000);
+    let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
+    writeln!(rtt, "{:?}", _info);
     cortex_m::peripheral::SCB::sys_reset(); // -> !
 }
