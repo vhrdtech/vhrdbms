@@ -237,17 +237,18 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             }
             match bq769x0.sys_stat(i2c) {
                 Ok(sys_stat) => {
-                    if sys_stat.scd_is_set() | sys_stat.ocd_is_set() {
+                    if sys_stat.scd_is_set() | sys_stat.ocd_is_set() { // TODO: add max amount of restarts here?
                         writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
                         bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT).ok();
                         if bms_state.power_enabled {
-                            cx.spawn.bms_event(BmsEvent::PowerOn).ok();
+                            cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoForward)).ok();
                         }
                     }
                     if sys_stat.undervoltage_is_set() {
-                        writeln!(rtt, "{}UV detected{}", color::YELLOW, color::DEFAULT).ok();
+                        writeln!(rtt, "{}UV detected, shutting off{}", color::YELLOW, color::DEFAULT).ok();
                         bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
-                        cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                        // cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                        cx.spawn.bms_event(BmsEvent::Halt).ok();
                     }
                     if sys_stat.device_xready_is_set() {
                         writeln!(rtt, "{}Xready detected, clearing{}", color::RED, color::DEFAULT).ok();
@@ -257,6 +258,15 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 },
                 Err(_) => {}
             }
+            let soft_undervoltage_cells = find_cells(i2c, bq769x0, |cell, _| {
+                cell < config::CELL_SOFT_UV_THRESHOLD
+            }).unwrap_or(0) & config::CELL_COUNT.cells_mask();
+            if soft_undervoltage_cells != 0 {
+                writeln!(rtt, "{}Soft undervoltage: {:015b} {}", color::YELLOW, soft_undervoltage_cells, color::DEFAULT).ok();
+                cx.spawn.softoff().ok();
+            }
+
+            crate::tasks::api::send_telemetry(can_tx);
 
             // if bms_state.charge_enabled {
             //     bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);
