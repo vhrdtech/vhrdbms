@@ -1,18 +1,18 @@
 #![no_main]
 #![no_std]
-#![feature(alloc_error_handler)]
+// #![feature(alloc_error_handler)]
 #![feature(const_option)]
 
 #[macro_use]
 mod util;
 mod tasks;
 mod config;
-mod power_block;
-mod board_components;
+// mod power_block;
+// mod board_components;
 
 // use core::fmt::Write;
 use jlink_rtt::NonBlockingOutput;
-extern crate alloc;
+// extern crate alloc;
 
 use rtic::app;
 
@@ -41,7 +41,7 @@ const APP: () = {
         can_rx: config::CanRX,
         i2c: config::InternalI2c,
         bq76920: config::BQ769x0,
-        power_blocks: config::PowerBlocksMap,
+        // power_blocks: config::PowerBlocksMap,
         exti: Exti,
         button: config::ButtonPin,
         button_state: tasks::button::ButtonState,
@@ -63,7 +63,6 @@ const APP: () = {
             i2c,
             bq76920,
             rtt,
-            power_blocks,
             adc,
             afe_io,
             can_tx,
@@ -209,7 +208,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, power_blocks, afe_io, mcp25625],
+        resources = [i2c, bq76920, rtt, afe_io, mcp25625],
         spawn = [bms_event]
     )]
     fn idle(cx: idle::Context) -> ! {
@@ -227,20 +226,24 @@ fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
     panic!("HF: {:#?}", ef);
 }
 
-use core::alloc::Layout;
-#[alloc_error_handler]
-fn oom(_: Layout) -> ! {
-    panic!("OOM");
-}
+// use core::alloc::Layout;
+// #[alloc_error_handler]
+// fn oom(_: Layout) -> ! {
+//     panic!("OOM");
+// }
 
 use core::panic::PanicInfo;
 use stm32l0xx_hal::gpio::gpiob::PB2;
+use mcu_helper::color;
 
 #[inline(never)]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    cortex_m::asm::delay(6_000_000);
-    // let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
+    use core::fmt::Write;
+    let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
+    writeln!(rtt, "\n{}PANIC{}\n", color::RED, color::DEFAULT).ok();
     // writeln!(rtt, "{:?}", _info).ok();
+
+    cortex_m::asm::delay(6_000_000);
     cortex_m::peripheral::SCB::sys_reset(); // -> !
 }

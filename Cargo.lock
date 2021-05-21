@@ -12,16 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloc-cortex-m"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c46567ff10c713079e2b9ee67638073471a6b265e22c0bcd8ca96f63545cc90b"
-dependencies = [
- "cortex-m",
- "linked_list_allocator",
-]
-
-[[package]]
 name = "as-slice"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -291,7 +281,6 @@ source = "git+https://github.com/romixlab/jlink_rtt#45db3f36ce1f395f6311720ebd36
 name = "l031c6_gcarrier"
 version = "0.1.0"
 dependencies = [
- "alloc-cortex-m",
  "bitbang-hal",
  "bq769x0",
  "btoi",
@@ -306,19 +295,12 @@ dependencies = [
  "mcp25625",
  "mcu_helper",
  "no-std-compat",
- "panic_ramlog",
  "power_helper",
  "stm32l0xx-hal",
  "uavcan",
  "uavcan_bridge",
  "vhrdcan",
 ]
-
-[[package]]
-name = "linked_list_allocator"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84565678e403453d1a27a0886882b3b271701e65146d972d9d7d9a4c4a0ff498"
 
 [[package]]
 name = "mcp25625"
@@ -387,14 +369,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "panic_ramlog"
-version = "0.1.0"
-dependencies = [
- "cfg-if",
- "cortex-m",
 ]
 
 [[package]]

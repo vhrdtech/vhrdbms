@@ -18,16 +18,16 @@ pub type Mcp25625Mosi = PA12<Analog>;
 pub type Mcp25625Cs = PA9<Output<PushPull>>;
 pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<hal::pac::SPI1, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
 pub type Mcp25625Irq = PA10<Input<PullUp>>;
-pub type CanTX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U8>;
+pub type CanTX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U16>;
 pub type CanRX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U8>;
 pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI4_15;
 
 // DCDCs and Switches
 // Make sure size is enough, since it is not easily possible to check that unfortunately
-use alloc::boxed::Box;
-use power_helper::power_block::PowerBlockControl;
-use crate::power_block::PowerBlockId;
-pub type PowerBlocksMap =  heapless::FnvIndexMap::<PowerBlockId, Box<dyn PowerBlockControl + Send>, heapless::consts::U16>;
+// use alloc::boxed::Box;
+// use power_helper::power_block::PowerBlockControl;
+// use crate::power_block::PowerBlockId;
+// pub type PowerBlocksMap =  heapless::FnvIndexMap::<PowerBlockId, Box<dyn PowerBlockControl + Send>, heapless::consts::U16>;
 
 // Internal i2c
 #[cfg(not(feature = "bitbang-i2c"))]

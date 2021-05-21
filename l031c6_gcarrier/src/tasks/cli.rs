@@ -1,7 +1,7 @@
 use core::fmt::Write;
 use crate::{config, tasks};
 use mcu_helper::color;
-use crate::power_block::PowerBlockId;
+// use crate::power_block::PowerBlockId;
 use core::convert::TryFrom;
 use crate::tasks::bms::BmsEvent;
 // use power_helper::power_block::PowerBlockControl;
@@ -49,7 +49,6 @@ pub fn cli(
     rtt: &mut jlink_rtt::NonBlockingOutput,
     i2c: &mut config::InternalI2c,
     bq769x0: &mut config::BQ769x0,
-    power_blocks: &mut config::PowerBlocksMap,
     spawn: crate::idle::Spawn,
     afe_io: &mut tasks::bms::AfeIo,
     mcp25625: &mut config::Mcp25625Instance
@@ -73,9 +72,9 @@ pub fn cli(
                         "afe" => {
                             afe_command(&mut args, i2c, bq769x0, afe_io, rtt);
                         },
-                        "pb" => {
-                            power_blocks_command(&mut args, power_blocks, rtt);
-                        },
+                        // "pb" => {
+                        //     power_blocks_command(&mut args, power_blocks, rtt);
+                        // },
                         "reset" => {
                             cortex_m::peripheral::SCB::sys_reset(); // -> !
                         },
@@ -264,58 +263,58 @@ fn afe_command(
     writeln!(fmt, "{}dsg, chg, stat, cells, vi, bal!{}", color::YELLOW, color::DEFAULT).ok();
 }
 
-fn power_blocks_command(
-    args: &mut core::str::SplitAsciiWhitespace,
-    power_blocks: &mut config::PowerBlocksMap,
-    fmt: &mut dyn core::fmt::Write
-) {
-    let cmd = match args.next() {
-        Some(cmd) => cmd,
-        None => {
-            writeln!(fmt, "{}pb <c> [b]{}", color::YELLOW, color::DEFAULT).ok();
-            return;
-        }
-    };
-    match cmd {
-        "list" => {
-            for (block, _) in power_blocks {
-                let block_name: &'static str = (*block).into();
-                writeln!(fmt, "{}", block_name).ok();
-            }
-        },
-        cmd @ "off" | cmd @ "on" | cmd @ "stat" => {
-            let block_name = match args.next() {
-                Some(block_name) => block_name,
-                None => {
-                    writeln!(fmt, "{}pb <b> <c>{}", color::YELLOW, color::DEFAULT).ok();
-                    return;
-                }
-            };
-            let block_id = match PowerBlockId::try_from(block_name) {
-                Ok(id) => id,
-                Err(_) => {
-                    writeln!(fmt, "{}wrong arg{}", color::YELLOW, color::DEFAULT).ok();
-                    return;
-                }
-            };
-            let block = power_blocks.get_mut(&block_id).expect("PB");
-
-            match one_of(Some(cmd), &["off", "on", "stat"], fmt).unwrap() {
-                0 => {
-                    block.disable();
-                },
-                1 => {
-                    block.enable();
-                },
-                2 => {
-                    writeln!(fmt, "{}: {:?}", block_name, block).ok();
-                },
-                _ => unreachable!()
-            }
-        },
-        _ => { writeln!(fmt, "Unknown command").ok(); }
-    }
-}
+// fn power_blocks_command(
+//     args: &mut core::str::SplitAsciiWhitespace,
+//     power_blocks: &mut config::PowerBlocksMap,
+//     fmt: &mut dyn core::fmt::Write
+// ) {
+//     let cmd = match args.next() {
+//         Some(cmd) => cmd,
+//         None => {
+//             writeln!(fmt, "{}pb <c> [b]{}", color::YELLOW, color::DEFAULT).ok();
+//             return;
+//         }
+//     };
+//     match cmd {
+//         "list" => {
+//             for (block, _) in power_blocks {
+//                 let block_name: &'static str = (*block).into();
+//                 writeln!(fmt, "{}", block_name).ok();
+//             }
+//         },
+//         cmd @ "off" | cmd @ "on" | cmd @ "stat" => {
+//             let block_name = match args.next() {
+//                 Some(block_name) => block_name,
+//                 None => {
+//                     writeln!(fmt, "{}pb <b> <c>{}", color::YELLOW, color::DEFAULT).ok();
+//                     return;
+//                 }
+//             };
+//             let block_id = match PowerBlockId::try_from(block_name) {
+//                 Ok(id) => id,
+//                 Err(_) => {
+//                     writeln!(fmt, "{}wrong arg{}", color::YELLOW, color::DEFAULT).ok();
+//                     return;
+//                 }
+//             };
+//             let block = power_blocks.get_mut(&block_id).expect("PB");
+//
+//             match one_of(Some(cmd), &["off", "on", "stat"], fmt).unwrap() {
+//                 0 => {
+//                     block.disable();
+//                 },
+//                 1 => {
+//                     block.enable();
+//                 },
+//                 2 => {
+//                     writeln!(fmt, "{}: {:?}", block_name, block).ok();
+//                 },
+//                 _ => unreachable!()
+//             }
+//         },
+//         _ => { writeln!(fmt, "Unknown command").ok(); }
+//     }
+// }
 
 fn i2c_command(
     args: &mut core::str::SplitAsciiWhitespace,

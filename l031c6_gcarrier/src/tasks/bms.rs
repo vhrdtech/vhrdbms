@@ -10,15 +10,15 @@ use stm32l0xx_hal::time::MicroSeconds;
 use mcu_helper::color;
 use bq769x0::{SCDDelay, Amperes, OCDDelay, MicroOhms, UVDelay, OVDelay};
 use bq769x0::Config as BQ769x0Config;
-use crate::power_block::PowerBlockId;
+// use crate::power_block::PowerBlockId;
 use crate::util::EventSource;
 
-#[derive(Debug)]
-pub struct PowerRailCommand {
-    pub rail: PowerBlockId,
-    pub powered: bool,
-    pub delay_after: Option<MicroSeconds>,
-}
+// #[derive(Debug)]
+// pub struct PowerRailCommand {
+//     pub rail: PowerBlockId,
+//     pub powered: bool,
+//     pub delay_after: Option<MicroSeconds>,
+// }
 
 #[derive(Debug)]
 pub enum BmsEvent {
@@ -28,7 +28,7 @@ pub enum BmsEvent {
     CheckAfe,
     CheckBalancing,
     Halt,
-    PowerRailControl(PowerRailCommand)
+    // PowerRailControl(PowerRailCommand)
 }
 
 #[derive(Default)]
@@ -158,7 +158,6 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let i2c: &mut config::InternalI2c = cx.resources.i2c;
     let bq769x0: &mut config::BQ769x0 = cx.resources.bq76920;
     let rtt = cx.resources.rtt;
-    let power_blocks = cx.resources.power_blocks;
     let clocks = cx.resources.clocks;
     let _adc = cx.resources.adc;
     let afe_io: &mut AfeIo = cx.resources.afe_io;
@@ -181,7 +180,6 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             if !bms_state.power_enabled {
                 return;
             }
-            crate::power_block::disable_all(power_blocks);
             let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
             bms_state.power_enabled = false;
             writeln!(rtt, "Power disabled").ok();
@@ -200,7 +198,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             let dsg_successful = r.is_ok();
             writeln!(rtt, "DSG successful?: {:?}", r).ok();
             if dsg_successful {
-                crate::power_block::enable_all(power_blocks);
+                // crate::power_block::enable_all(power_blocks);
                 bms_state.power_enabled = true;
                 bms_state.power_on_fault_count = 0;
                 cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
@@ -355,23 +353,23 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 }
             }
         },
-        BmsEvent::PowerRailControl(cmd) => {
-            if !bms_state.power_enabled {
-                return;
-            }
-            let pb = power_blocks.get_mut(&cmd.rail).expect("I1");
-            if cmd.powered {
-                pb.enable();
-            } else {
-                pb.disable();
-            }
-            match cmd.delay_after {
-                Some(delay) => {
-                    cortex_m::asm::delay(us2cycles_raw!(clocks, delay.0) as u32);
-                },
-                None => {}
-            }
-        }
+        // BmsEvent::PowerRailControl(cmd) => {
+        //     if !bms_state.power_enabled {
+        //         return;
+        //     }
+        //     let pb = power_blocks.get_mut(&cmd.rail).expect("I1");
+        //     if cmd.powered {
+        //         pb.enable();
+        //     } else {
+        //         pb.disable();
+        //     }
+        //     match cmd.delay_after {
+        //         Some(delay) => {
+        //             cortex_m::asm::delay(us2cycles_raw!(clocks, delay.0) as u32);
+        //         },
+        //         None => {}
+        //     }
+        // }
     }
 }
 

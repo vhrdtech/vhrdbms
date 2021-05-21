@@ -2,11 +2,11 @@ use core::fmt::Write;
 //#[allow(unused_imports)]
 //use panic_ramlog;
 
-use alloc_cortex_m::CortexMHeap;
-#[global_allocator]
-static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
-extern crate alloc;
-use alloc::boxed::Box;
+// use alloc_cortex_m::CortexMHeap;
+// #[global_allocator]
+// static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
+// extern crate alloc;
+// use alloc::boxed::Box;
 
 use stm32l0xx_hal as hal;
 use hal::{
@@ -19,7 +19,7 @@ use hal::{
 };
 
 use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin};
-use crate::power_block::PowerBlockId;
+// use crate::power_block::PowerBlockId;
 
 use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode, FiltersConfigBuffer0, FiltersConfigBuffer1, FiltersMask};
 
@@ -90,10 +90,10 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
 
 
     // Power switches and DC-DCs
-    use PowerBlockType::*;
-    use PowerBlockId::*;
+    // use PowerBlockType::*;
+    // use PowerBlockId::*;
     // Be careful with the map size!
-    let mut power_blocks = config::PowerBlocksMap::new();
+    // let mut power_blocks = config::PowerBlocksMap::new();
 
     // Go back to standby mode if button is not pressed (woken by watchdog)
     let button = gpioa.pa15.into_floating_input();
@@ -115,9 +115,10 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
 
     // Initialize allocator
     // Used only in init to store PowerBlock trait objects in array
-    let start = cortex_m_rt::heap_start() as usize;
-    let size = 512; // in bytes
-    unsafe { ALLOCATOR.init(start, size) }
+    // let start = cortex_m_rt::heap_start() as usize;
+    // writeln!(rtt, "heap: {}", start);
+    // let size = 512; // in bytes
+    // unsafe { ALLOCATOR.init(start, size) }
 
     // +5V0_BMS & +3V3_BMS (Self power, ORed with BQ76920 +3V3_AFE)
     let mut ps_5v0_bms_en = gpioa.pa3.into_push_pull_output();
@@ -127,26 +128,28 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // );
     // let _ = power_blocks.insert(DcDc5V0Bms, Box::new(pb_5v0_bms));
     // +5V0_SYSCAN switch
-    let ps_5v0_syscan_en = gpioa.pa5.into_push_pull_output();
-    let pb_5v0_syscan: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-        Switch, ps_5v0_syscan_en, None
-    );
-    let _ = power_blocks.insert(Switch5V0Syscan, Box::new(pb_5v0_syscan));
+    let mut ps_5v0_syscan_en = gpioa.pa5.into_push_pull_output();
+    // let pb_5v0_syscan: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+    //     Switch, ps_5v0_syscan_en, None
+    // );
+    // let _ = power_blocks.insert(Switch5V0Syscan, Box::new(pb_5v0_syscan));
     // +3V3_BMS_S0 switch
-    let ps_3v3_s0_en = gpioa.pa4.into_push_pull_output();
-    let pb_3v3_s0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-        Switch, ps_3v3_s0_en, None
-    );
-    let _ = power_blocks.insert(Switch3V3S0, Box::new(pb_3v3_s0));
+    let mut ps_3v3_s0_en = gpioa.pa4.into_push_pull_output();
+    // let pb_3v3_s0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+    //     Switch, ps_3v3_s0_en, None
+    // );
+    // let _ = power_blocks.insert(Switch3V3S0, Box::new(pb_3v3_s0));
     // +5V0_UWB switch
     let ps_5v0_uwb_en = gpiob.pb0.into_push_pull_output();
-    let pb_5v0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-        Switch, ps_5v0_uwb_en, None
-    );
-    let _ = power_blocks.insert(Switch5V0Uwb, Box::new(pb_5v0));
+    // let pb_5v0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+    //     Switch, ps_5v0_uwb_en, None
+    // );
+    // let _ = power_blocks.insert(Switch5V0Uwb, Box::new(pb_5v0));
 
-    power_blocks.get_mut(&Switch5V0Syscan).unwrap().enable();
-    power_blocks.get_mut(&Switch3V3S0).unwrap().enable();
+    // power_blocks.get_mut(&Switch5V0Syscan).unwrap().enable();
+    ps_5v0_syscan_en.set_high().ok();
+    // power_blocks.get_mut(&Switch3V3S0).unwrap().enable();
+    ps_3v3_s0_en.set_high().ok();
     cortex_m::asm::delay(ms2cycles_raw!(clocks, 10));
 
 
@@ -314,7 +317,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         can_rx,
         i2c,
         bq76920,
-        power_blocks,
+        // power_blocks,
         exti,
         button,
         button_state,

@@ -9,7 +9,7 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
 
             let mut bq769x0 = cx.resources.bq76920;
             let mut i2c = cx.resources.i2c;
-            let mut power_blocks = cx.resources.power_blocks;
+            // let mut power_blocks = cx.resources.power_blocks;
             let mut afe_io = cx.resources.afe_io;
             let mut mcp25625 = cx.resources.mcp25625;
             let spawn = cx.spawn;
@@ -22,13 +22,13 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
                 cx.resources.rtt.lock(|rtt| {
                     i2c.lock(|i2c| {
                         bq769x0.lock(|bq769x0| {
-                            power_blocks.lock(|power_blocks| {
+                            // power_blocks.lock(|power_blocks| {
                                 afe_io.lock(|afe_io| {
                                     mcp25625.lock(|mcp25625| {
-                                        super::cli::cli(rtt, i2c, bq769x0, power_blocks, spawn, afe_io, mcp25625);
+                                        super::cli::cli(rtt, i2c, bq769x0, spawn, afe_io, mcp25625);
                                     })
                                 })
-                            })
+                            // })
                         });
                     });
 
