@@ -44,3 +44,4 @@ optional = true
 cli = []
 bitbang-i2c = ["bitbang-hal"]
 softoff = []
+canbus-printstat = []

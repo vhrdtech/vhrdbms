@@ -2,6 +2,18 @@ use core::fmt::Write;
 use stm32l0xx_hal::exti::{Exti, GpioLine, ExtiLine};
 use mcp25625::{McpReceiveBuffer, McpPriority, };
 use crate::config;
+use cfg_if::cfg_if;
+use mcu_helper::color;
+
+macro_rules! write_if_cps {
+    ($rtt: expr, $($arg:tt)*) => {
+        cfg_if! {
+            if #[cfg(feature = "canbus-printstat")] {
+                writeln!($rtt, $($arg)*).ok();
+            }
+        }
+    };
+}
 
 pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
     let irq_line = GpioLine::from_raw_line(cx.resources.mcp25625_irq.pin_number()).unwrap();
@@ -10,16 +22,20 @@ pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
     // }
     Exti::unpend(irq_line);
 
-    let _rtt: &mut jlink_rtt::NonBlockingOutput = &mut cx.resources.rtt;
+    cfg_if! {
+        if #[cfg(feature = "canbus-printstat")] {
+            let rtt: &mut jlink_rtt::NonBlockingOutput = &mut cx.resources.rtt;
+            rtt.write_bytes(&[0xff, '1' as u8]);
+        }
+    }
     let mcp25625: &mut config::Mcp25625Instance = cx.resources.mcp25625;
     let can_tx: &mut config::CanTX = cx.resources.can_tx;
     let can_rx: &mut config::CanRX = cx.resources.can_rx;
 
     let intf = mcp25625.interrupt_flags();
-    // writeln!(_rtt, "{:?}", intf).ok();
+    write_if_cps!(rtt, "INTF: {:?}", intf);
     let errf = mcp25625.error_flags();
-    _rtt.write_bytes(&[0xff, '1' as u8]);
-    writeln!(_rtt, "{:?}", errf).ok();
+    write_if_cps!(rtt, "{:?}", errf);
 
     let mut buffers = [None, None];
     buffers[0] = if intf.rx0if_is_set() {
@@ -40,33 +56,36 @@ pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
         let frame = mcp25625.receive(b.unwrap());
         match can_rx.pool.new_frame_from_raw(frame) {
             Ok(frame) => {
-                // writeln!(_rtt, "rx 1");
-                can_rx.heap.push(frame).ok();
+                match can_rx.heap.push(frame) {
+                    Ok(_) => {
+                        write_if_cps!(rtt, "{}RX: {:?}{}", color::GREEN, frame, color::DEFAULT);
+                    },
+                    Err(_) => {
+                        write_if_cps!(rtt, "{}RX overflow{}", color::YELLOW, color::DEFAULT);
+                    }
+                }
                 new_frames = true;
             },
-            Err(_) => {
-                // writeln!(_rtt, "rxdrop 1").ok();
-            }
+            Err(_) => {}
         }
     }
     if new_frames {
         cx.spawn.can_rx().ok();
     }
+
     let tec = mcp25625.tec();
     let rec = mcp25625.rec();
-    writeln!(_rtt, "tec:{}, rec:{}", tec, rec).ok();
-    //
+    write_if_cps!(rtt, "TEC: {}, REC: {}", tec, rec);
 
     for _ in 0..3 {
         match can_tx.heap.pop() {
             Some(frame) => {
                 match mcp25625.send(frame.as_raw_frame_ref(), McpPriority::Highest) {
                     Ok(_) => {
-                        // let _ = can_tx.heap.pop();
-                        // writeln!(_rtt, "sent 1");
+                        write_if_cps!(rtt, "{}TX: {:?}{}", color::CYAN, frame, color::DEFAULT);
                     }
-                    Err(_) => {
-                        // writeln!(_rtt, "err 1");
+                    Err(e) => {
+                        write_if_cps!(rtt, "TX error: {:?}", e);
                         break;
                     }
                 }
@@ -82,5 +101,10 @@ pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
     }
     mcp25625.reset_interrupt_flags(0xFF);
 
-    _rtt.write_bytes(&[0xff, '0' as u8]);
+    cfg_if! {
+        if #[cfg(feature = "canbus-printstat")] {
+            writeln!(rtt, "\n").ok();
+            rtt.write_bytes(&[0xff, '0' as u8]);
+        }
+    }
 }
