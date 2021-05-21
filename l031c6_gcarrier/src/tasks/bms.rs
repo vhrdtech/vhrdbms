@@ -143,29 +143,40 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let clocks = cx.resources.clocks;
     let _adc = cx.resources.adc;
     let afe_io: &mut AfeIo = cx.resources.afe_io;
+    let can_tx = cx.resources.can_tx;
 
     match e {
-        BmsEvent::TogglePower => {
+        BmsEvent::TogglePower(source) => {
             if bms_state.power_enabled {
                 if config::SOFTOFF_TIMEOUT_MS == 0 {
-                    cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                    cx.spawn.bms_event(BmsEvent::PowerOff(source)).ok();
                 } else {
                     writeln!(rtt, "Softoff spawned").ok();
                     cx.spawn.softoff().ok();
                 }
             } else {
-                cx.spawn.bms_event(BmsEvent::PowerOn).ok();
+                cx.spawn.bms_event(BmsEvent::PowerOn(source)).ok();
             }
         },
-        BmsEvent::PowerOff => {
+        BmsEvent::PowerOff(source) => {
+            if !bms_state.power_enabled {
+                return;
+            }
             crate::power_block::disable_all(power_blocks);
             let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
             bms_state.power_enabled = false;
             writeln!(rtt, "Power disabled").ok();
             cx.spawn.blinker(crate::tasks::led::Event::OffMode).ok();
+            if source.need_to_forward() {
+                crate::tasks::api::broadcast_power_control_frame(can_tx, false);
+            }
         },
-        BmsEvent::PowerOn => {
-            crate::board_components::imx_prepare_boot(i2c, tca9534, rtt);
+        BmsEvent::PowerOn(source) => {
+            if bms_state.power_enabled {
+                writeln!(rtt, "Already on").ok();
+                return;
+            }
+            // crate::board_components::imx_prepare_boot(i2c,  rtt);
             let r = afe_discharge(i2c, bq769x0, true);
             let dsg_successful = r.is_ok();
             writeln!(rtt, "DSG successful?: {:?}", r).ok();
@@ -174,6 +185,9 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bms_state.power_enabled = true;
                 bms_state.power_on_fault_count = 0;
                 cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
+                if source.need_to_forward() {
+                    crate::tasks::api::broadcast_power_control_frame(can_tx, true);
+                }
             } else {
                 bms_state.power_on_fault_count += 1;
                 if bms_state.power_on_fault_count > 5 {
@@ -212,7 +226,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     }
                 }
             }
-            match bq769x0.is_charge_enabled(i2c) {
+            match bq769x0.is_charge_enabled(i2c) { // TODO: maybe remove this and check for OV directly
                 Ok(chg) => {
                     if !chg {
                         match bq769x0.sys_stat(i2c) {

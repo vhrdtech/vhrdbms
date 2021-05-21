@@ -6,6 +6,7 @@ use stm32l0xx_hal::prelude::InputPin;
 use crate::tasks::bms::{BmsEvent, PowerRailCommand};
 use crate::power_block::PowerBlockId;
 use stm32l0xx_hal::time::MicroSeconds;
+use crate::util::EventSource;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum ButtonState {
@@ -19,8 +20,12 @@ impl Default for ButtonState {
     }
 }
 
-pub fn button_irq(cx: crate::button_irq::Context) {
-    Exti::unpend(GpioLine::from_raw_line(cx.resources.button.pin_number()).unwrap());
+pub fn button_irq(cx: &mut crate::exti4_15::Context) {
+    let irq_line = GpioLine::from_raw_line(cx.resources.button.pin_number()).unwrap();
+    if !Exti::is_pending(irq_line) {
+        return;
+    }
+    Exti::unpend(irq_line);
     match cx.resources.button_state {
         ButtonState::Unpressed => {
             *cx.resources.button_state = ButtonState::Pressed;
@@ -50,7 +55,7 @@ pub fn button_event(cx: crate::button_event::Context) {
         ButtonState::Debounce(checks_done) => {
             if *checks_done >= config::BUTTON_LONG_PRESS_MS / CHECK_INTERVAL {
                 writeln!(rtt, "LONG_PRESS").ok();
-                cx.spawn.bms_event(BmsEvent::TogglePower).ok(); // TODO: bb
+                cx.spawn.bms_event(BmsEvent::TogglePower(EventSource::LocalForward)).ok(); // TODO: bb
                 ButtonState::Unpressed
             } else  {
                 if cx.resources.button.is_low().unwrap() {
@@ -58,16 +63,7 @@ pub fn button_event(cx: crate::button_event::Context) {
                     ButtonState::Debounce(*checks_done + 1)
                 } else if *checks_done >= config::BUTTON_SHORT_PRESS_MS / CHECK_INTERVAL {
                     writeln!(rtt, "SHORT_PRESS").ok(); // TODO: bb
-                    cx.spawn.bms_event(BmsEvent::PowerRailControl(PowerRailCommand{
-                        rail: PowerBlockId::Switch3V3Tms,
-                        powered: false,
-                        delay_after: Some(MicroSeconds(300_000))
-                    })).ok();
-                    cx.spawn.bms_event(BmsEvent::PowerRailControl(PowerRailCommand{
-                        rail: PowerBlockId::Switch3V3Tms,
-                        powered: true,
-                        delay_after: None
-                    })).ok();
+
                     ButtonState::Unpressed
                 } else {
                     ButtonState::Unpressed
