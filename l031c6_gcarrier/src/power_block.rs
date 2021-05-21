@@ -42,9 +42,9 @@ impl Into<&'static str> for PowerBlockId {
     }
 }
 
-pub fn enable_all(power_blocks: &mut config::PowerBlocksMap,) {
+pub fn enable_all(_power_blocks: &mut config::PowerBlocksMap,) {
     // power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
 }
 
-pub fn disable_all(power_blocks: &mut config::PowerBlocksMap) {
+pub fn disable_all(_power_blocks: &mut config::PowerBlocksMap) {
 }

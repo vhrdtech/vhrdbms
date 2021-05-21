@@ -53,7 +53,7 @@ pub fn can_rx(cx: crate::can_rx::Context) {
                 if config::SOFTOFF_TIMEOUT_MS == 0 {
                     cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::RemoteNoForward)).ok();
                 } else {
-                    cx.spawn.softoff();
+                    cx.spawn.softoff().ok();
                 }
             }
         }

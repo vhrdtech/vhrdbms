@@ -15,7 +15,6 @@ use hal::{
     exti::{GpioLine, ExtiLine, TriggerEdge, Exti},
     syscfg::SYSCFG,
     pwr::PWR,
-    pac::Peripherals,
     rtc::{Instant, RTC, ClockSource as RtcClockSource},
 };
 
@@ -31,7 +30,6 @@ use bq769x0::BQ769x0;
 
 use crate::tasks;
 use crate::config;
-use stm32l0xx_hal::gpio::AnyPin;
 use crate::tasks::led::ChargeIndicator;
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
@@ -75,12 +73,12 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // Buzzer
     let _buzzer = gpioa.pa0.into_analog();
     // Ring LEDs
-    let mut led1 = gpiob.pb12.into_push_pull_output();
-    let mut led2 = gpiob.pb13.into_push_pull_output();
-    let mut led3 = gpiob.pb14.into_push_pull_output();
-    let mut led4 = gpiob.pb11.into_push_pull_output();
-    let mut led5 = gpioa.pa8.into_push_pull_output();
-    let mut led6 = gpiob.pb15.into_push_pull_output();
+    let led1 = gpiob.pb12.into_push_pull_output();
+    let led2 = gpiob.pb13.into_push_pull_output();
+    let led3 = gpiob.pb14.into_push_pull_output();
+    let led4 = gpiob.pb11.into_push_pull_output();
+    let led5 = gpioa.pa8.into_push_pull_output();
+    let led6 = gpiob.pb15.into_push_pull_output();
     let charge_indicator = ChargeIndicator {
         led1, led2, led3, led4, led5, led6
     };
@@ -293,7 +291,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
 
     cx.spawn.watchdog().unwrap();
     cx.spawn.bms_event(tasks::bms::BmsEvent::CheckAfe).unwrap();
-    // cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
+    cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
     cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
     cx.spawn.blinker(tasks::led::Event::Toggle).unwrap();
     rtic::pend(config::BUTTON_IRQ); // if we got to this point, button was pressed

@@ -19,7 +19,6 @@ use rtic::app;
 use stm32l0xx_hal as hal;
 use hal::prelude::*;
 use hal::gpio::{Output, PushPull};
-use hal::gpio::gpioc::PC14;
 use hal::adc::Adc;
 use hal::exti::{Exti};
 use hal::watchdog::IndependedWatchdog;
@@ -41,7 +40,7 @@ const APP: () = {
         can_tx: config::CanTX,
         can_rx: config::CanRX,
         i2c: config::InternalI2c,
-        bq76920: bq769x0::BQ769x0,
+        bq76920: config::BQ769x0,
         power_blocks: config::PowerBlocksMap,
         exti: Exti,
         button: config::ButtonPin,
@@ -186,9 +185,9 @@ const APP: () = {
         spawn = [button_event, can_rx]
     )]
     fn exti4_15(mut cx: exti4_15::Context) {
-        let nvic = cortex_m::peripheral::NVIC::is_pending(CAN_TX_HANDLER);
-        use core::fmt::Write;
-        let pr = unsafe { (*stm32l0xx_hal::pac::EXTI::ptr()).pr.read().bits() };
+        // let nvic = cortex_m::peripheral::NVIC::is_pending(CAN_TX_HANDLER);
+        // use core::fmt::Write;
+        // let pr = unsafe { (*stm32l0xx_hal::pac::EXTI::ptr()).pr.read().bits() };
 
         // writeln!(cx.resources.rtt, "exti {:32b} nvic:{}", pr, nvic);
         tasks::canbus::canctrl_irq(&mut cx);
@@ -236,7 +235,6 @@ fn oom(_: Layout) -> ! {
 
 use core::panic::PanicInfo;
 use stm32l0xx_hal::gpio::gpiob::PB2;
-use crate::config::CAN_TX_HANDLER;
 
 #[inline(never)]
 #[panic_handler]

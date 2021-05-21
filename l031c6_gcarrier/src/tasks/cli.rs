@@ -1,4 +1,3 @@
-use bq769x0::{BQ769x0};
 use core::fmt::Write;
 use crate::{config, tasks};
 use mcu_helper::color;
@@ -10,7 +9,6 @@ use crate::tasks::bms::BmsEvent;
 use btoi::{btoi, ParseIntegerError, btoi_radix};
 use no_std_compat::prelude::v1::*;
 use crate::hal::prelude::*;
-use mcp25625::MCP25625;
 
 macro_rules! ok_or_return {
     ($e: expr, $fmt: ident, $message: expr) => {
@@ -50,7 +48,7 @@ fn print_str_array(strs: &[&str], fmt: &mut dyn core::fmt::Write) {
 pub fn cli(
     rtt: &mut jlink_rtt::NonBlockingOutput,
     i2c: &mut config::InternalI2c,
-    bq769x0: &mut BQ769x0,
+    bq769x0: &mut config::BQ769x0,
     power_blocks: &mut config::PowerBlocksMap,
     spawn: crate::idle::Spawn,
     afe_io: &mut tasks::bms::AfeIo,
@@ -125,7 +123,7 @@ fn one_of(arg: Option<&str>, choices: &[&'static str], fmt: &mut dyn core::fmt::
 fn afe_command(
     args: &mut core::str::SplitAsciiWhitespace,
     i2c: &mut config::InternalI2c,
-    bq769x0: &mut BQ769x0,
+    bq769x0: &mut config::BQ769x0,
     afe_io: &mut tasks::bms::AfeIo,
     fmt: &mut dyn core::fmt::Write,
 ) {
@@ -239,18 +237,18 @@ fn afe_command(
                             let cells: Result<u8, ParseIntegerError> = btoi_radix(cells.as_bytes(), 2);
                             let cells = ok_or_return!(cells, fmt, "not a binary number");
                             if (cells & 0b10101 != 0) && (cells & 0b01010 != 0) {
-                                writeln!(fmt, "Cannot balance consecutive cells!").ok();;
+                                writeln!(fmt, "Cannot balance consecutive cells!").ok();
                                 return;
                             }
-                            writeln!(fmt, "Enabling balance: {:?}", bq769x0.enable_balancing(i2c, cells)).ok();;
+                            writeln!(fmt, "Enabling balance: {:?}", bq769x0.enable_balancing(i2c, cells)).ok();
                         },
                         "off" => {
                             let r = bq769x0.enable_balancing(i2c, 0);
-                            writeln!(fmt, "Balancing off {:?}", r).ok();;
+                            writeln!(fmt, "Balancing off {:?}", r).ok();
                         },
                         "show" => {
                             let r = bq769x0.balancing_state(i2c);
-                            writeln!(fmt, "Balancing (C5:C1): {:05b}", r.unwrap_or(0)).ok();;
+                            writeln!(fmt, "Balancing (C5:C1): {:05b}", r.unwrap_or(0)).ok();
                         },
                         _ => {
                             writeln!(fmt, "Unknown command").ok();

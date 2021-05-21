@@ -3,7 +3,7 @@ use crate::hal;
 use hal::gpio::{
     gpioa::*,
     // gpiob::*,
-    gpioc::*,
+    // gpioc::*,
 };
 use hal::gpio::{Analog, PushPull, Output, OpenDrain};
 
@@ -35,7 +35,7 @@ pub type InternalI2c = hal::i2c::I2c<hal::pac::I2C1, PA10<Output<OpenDrain>>, PA
 #[cfg(feature = "bitbang-i2c")]
 pub type InternalI2c = bitbang_hal::i2c::I2cBB<PB6<Output<OpenDrain>>, PB7<Output<OpenDrain>>, hal::timer::Timer<hal::pac::TIM2>>;
 
-use stm32l0xx_hal::gpio::{Input, Floating, PullDown, PullUp};
+use stm32l0xx_hal::gpio::{Input, Floating, PullUp};
 
 // Power button
 pub type ButtonPin = PA15<Input<Floating>>;
@@ -44,6 +44,8 @@ pub const BUTTON_LONG_PRESS_MS: u32 = 2000;
 pub const BUTTON_IRQ: Interrupt = Interrupt::EXTI4_15; // keep in sync with button task!
 
 // Afe
+const BQ769X0_VARIANT: usize = bq769x0::BQ76920;
+pub type BQ769x0 = bq769x0::BQ769x0<{ BQ769X0_VARIANT }>;
 pub const CELL_COUNT: CellCount = CellCount::_4S;
 /// Halt after one of the cells drops below this threshold (HW)
 pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(2950);

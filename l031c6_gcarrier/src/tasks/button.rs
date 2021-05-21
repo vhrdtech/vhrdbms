@@ -3,9 +3,7 @@ use mcu_helper::tim_cyccnt::U32Ext;
 use stm32l0xx_hal::exti::{Exti, GpioLine, ExtiLine};
 use crate::config;
 use stm32l0xx_hal::prelude::InputPin;
-use crate::tasks::bms::{BmsEvent, PowerRailCommand};
-use crate::power_block::PowerBlockId;
-use stm32l0xx_hal::time::MicroSeconds;
+use crate::tasks::bms::{BmsEvent, };
 use crate::util::EventSource;
 
 #[derive(PartialEq, Eq, Debug)]

@@ -1,9 +1,9 @@
 use crate::{config, tasks};
-use bq769x0::{BQ769x0, MilliVolts};
+use bq769x0::{MilliVolts};
 use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
 //use crate::hal::prelude::_embedded_hal_adc_OneShot;
-use jlink_rtt::NonBlockingOutput;
+// use jlink_rtt::NonBlockingOutput;
 use stm32l0xx_hal::prelude::OutputPin;
 //use mcu_helper::color;
 use stm32l0xx_hal::time::MicroSeconds;
@@ -38,7 +38,7 @@ pub struct BmsState {
     //charge_enabled: bool,
     //vchg_prev_mv: u32,
 
-    balancing_state: BalancingState,
+    // balancing_state: BalancingState,
     afe_fault_count: u8,
     power_on_fault_count: u8
 }
@@ -66,35 +66,35 @@ pub struct AfeIo {
     pub afe_dsg_override: config::AfeDsgOverridePin,
 }
 
-enum BalancingStage {
-    /// Find cells with delta from lower >= config::BALANCE_START_DELTA_MV
-    /// If at least one found -> Phase1, else -> CheckStart
-    CheckStart,
-    /// Enable balancing for the first set of cells
-    Phase1,
-    // Enable balancing for the second set of cells (if not empty)
-    // Phase2,
-}
-impl Default for BalancingStage {
-    fn default() -> Self {
-        BalancingStage::CheckStart
-    }
-}
-
-struct BalancingState {
-    stage: BalancingStage,
-    phase1: u16,
-    phase2: u16,
-}
-impl Default for BalancingState {
-    fn default() -> Self {
-        BalancingState {
-            stage: BalancingStage::default(),
-            phase1: 0,
-            phase2: 0
-        }
-    }
-}
+// enum BalancingStage {
+//     /// Find cells with delta from lower >= config::BALANCE_START_DELTA_MV
+//     /// If at least one found -> Phase1, else -> CheckStart
+//     CheckStart,
+//     /// Enable balancing for the first set of cells
+//     Phase1,
+//     // Enable balancing for the second set of cells (if not empty)
+//     // Phase2,
+// }
+// impl Default for BalancingStage {
+//     fn default() -> Self {
+//         BalancingStage::CheckStart
+//     }
+// }
+//
+// struct BalancingState {
+//     stage: BalancingStage,
+//     phase1: u16,
+//     phase2: u16,
+// }
+// impl Default for BalancingState {
+//     fn default() -> Self {
+//         BalancingState {
+//             stage: BalancingStage::default(),
+//             phase1: 0,
+//             phase2: 0
+//         }
+//     }
+// }
 
 pub enum CellCount {
     _3S,
@@ -113,7 +113,7 @@ impl CellCount {
 
 pub fn afe_init(
     i2c: &mut config::InternalI2c,
-    bq769x0: &mut BQ769x0,
+    bq769x0: &mut config::BQ769x0,
 ) -> Result<bq769x0::CalculatedValues, Error> {
     let bq769x0_config = BQ769x0Config {
         shunt: MicroOhms(2000),
@@ -131,7 +131,7 @@ pub fn afe_init(
 
 pub fn afe_discharge(
     i2c: &mut config::InternalI2c,
-    bq769x0: &mut BQ769x0,
+    bq769x0: &mut config::BQ769x0,
     enable: bool
 ) -> Result<(), Error> {
     if !enable {
@@ -156,7 +156,7 @@ pub fn afe_discharge(
 pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let bms_state: &mut BmsState = cx.resources.bms_state;
     let i2c: &mut config::InternalI2c = cx.resources.i2c;
-    let bq769x0: &mut BQ769x0 = cx.resources.bq76920;
+    let bq769x0: &mut config::BQ769x0 = cx.resources.bq76920;
     let rtt = cx.resources.rtt;
     let power_blocks = cx.resources.power_blocks;
     let clocks = cx.resources.clocks;
@@ -341,8 +341,8 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckAfe).ok();
         },
         BmsEvent::CheckBalancing => {
-            let _ = check_balancing(i2c, bq769x0, &mut bms_state.balancing_state, rtt);
-            cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::BALANCING_CHECK_INTERVAL_MS), BmsEvent::CheckBalancing).ok();
+            // let _ = check_balancing(i2c, bq769x0, &mut bms_state.balancing_state, rtt);
+            // cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::BALANCING_CHECK_INTERVAL_MS), BmsEvent::CheckBalancing).ok();
         },
         BmsEvent::Halt => {
             match bq769x0.ship_enter(i2c) {
@@ -377,7 +377,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
 
 fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
     i2c: &mut config::InternalI2c,
-    bq769x0: &mut BQ769x0,
+    bq769x0: &mut config::BQ769x0,
     f: F
 ) -> Result<u16, Error> {
     let cells = bq769x0.cell_voltages(i2c)?;
@@ -390,62 +390,62 @@ fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
     Ok(cells)
 }
 
-fn check_balancing(
-    i2c: &mut config::InternalI2c,
-    bq769x0: &mut BQ769x0,
-    state: &mut BalancingState,
-    rtt: &mut NonBlockingOutput
-) -> Result<(), Error> {
-    state.stage = match state.stage {
-        BalancingStage::CheckStart => {
-            let balance_phases = find_cells(i2c, bq769x0, |cell, low_cell| {
-                (cell.0 - low_cell.0) > config::BALANCE_START_DELTA_MV
-            })?;
-            let balance_phases = (balance_phases & 0b00101010_10101010, balance_phases & 0b01010101_01010101);
-            if balance_phases.0 != 0 || balance_phases.1 != 0 {
-                writeln!(rtt, "CheckStart {:05b} {:05b}", balance_phases.0, balance_phases.1).ok();
-                state.phase1 = balance_phases.0;
-                state.phase2 = balance_phases.1;
-                BalancingStage::Phase1
-            } else {
-                writeln!(rtt, "Balanced").ok();
-                BalancingStage::CheckStart
-            }
-        }
-        BalancingStage::Phase1 => {
-            if state.phase1 != 0 {
-                // writeln!(rtt, "Phase1 {:05b}", state.phase1).ok();
-                bq769x0.enable_balancing(i2c, state.phase1 as u8)?;
-            }
-            BalancingStage::CheckStart
-        }
-        // BalancingStage::Phase2 => {
-        //     if state.phase2 != 0 {
-        //         // writeln!(rtt, "Phase2 {:05b}", state.phase2).ok();
-        //         bq769x0.enable_balancing(i2c, state.phase2 as u8)?;
-        //     }
-        //     let stop_balancing = find_cells(i2c, bq769x0, |cell, low_cell| {
-        //         (cell.0 - low_cell.0) < config::BALANCE_STOP_DELTA_MV
-        //     })?;
-        //     // writeln!(rtt, "CheckStop {:05b} {:05b}", stop_balancing.0, stop_balancing.1).ok();
-        //     state.phase1 &= !stop_balancing.0;
-        //     state.phase2 &= !stop_balancing.1;
-        //     if state.phase1 != 0 || state.phase2 != 0 {
-        //         BalancingStage::Phase1
-        //     } else {
-        //         bq769x0.enable_balancing(i2c, 0)?;
-        //         BalancingStage::CheckStart
-        //     }
-        // }
-    };
-
-    //let max_delta = cells.iter().map(|cell| *cell - low_cell).max().unwrap();
-
-    // let mut i = 1;
-    // for needs_balancing in unbalanced_cells {
-    //     writeln!(rtt, "{}: {}", i, needs_balancing);
-    //     i += 1;
-    // }
-    // writeln!(rtt, "max_delta: {}", max_delta).ok();
-    Ok(())
-}
+// fn check_balancing(
+//     i2c: &mut config::InternalI2c,
+//     bq769x0: &mut config::BQ769x0,
+//     state: &mut BalancingState,
+//     rtt: &mut NonBlockingOutput
+// ) -> Result<(), Error> {
+//     state.stage = match state.stage {
+//         BalancingStage::CheckStart => {
+//             let balance_phases = find_cells(i2c, bq769x0, |cell, low_cell| {
+//                 (cell.0 - low_cell.0) > config::BALANCE_START_DELTA_MV
+//             })?;
+//             let balance_phases = (balance_phases & 0b00101010_10101010, balance_phases & 0b01010101_01010101);
+//             if balance_phases.0 != 0 || balance_phases.1 != 0 {
+//                 writeln!(rtt, "CheckStart {:05b} {:05b}", balance_phases.0, balance_phases.1).ok();
+//                 state.phase1 = balance_phases.0;
+//                 state.phase2 = balance_phases.1;
+//                 BalancingStage::Phase1
+//             } else {
+//                 writeln!(rtt, "Balanced").ok();
+//                 BalancingStage::CheckStart
+//             }
+//         }
+//         BalancingStage::Phase1 => {
+//             if state.phase1 != 0 {
+//                 // writeln!(rtt, "Phase1 {:05b}", state.phase1).ok();
+//                 bq769x0.enable_balancing(i2c, state.phase1 as u8)?;
+//             }
+//             BalancingStage::CheckStart
+//         }
+//         // BalancingStage::Phase2 => {
+//         //     if state.phase2 != 0 {
+//         //         // writeln!(rtt, "Phase2 {:05b}", state.phase2).ok();
+//         //         bq769x0.enable_balancing(i2c, state.phase2 as u8)?;
+//         //     }
+//         //     let stop_balancing = find_cells(i2c, bq769x0, |cell, low_cell| {
+//         //         (cell.0 - low_cell.0) < config::BALANCE_STOP_DELTA_MV
+//         //     })?;
+//         //     // writeln!(rtt, "CheckStop {:05b} {:05b}", stop_balancing.0, stop_balancing.1).ok();
+//         //     state.phase1 &= !stop_balancing.0;
+//         //     state.phase2 &= !stop_balancing.1;
+//         //     if state.phase1 != 0 || state.phase2 != 0 {
+//         //         BalancingStage::Phase1
+//         //     } else {
+//         //         bq769x0.enable_balancing(i2c, 0)?;
+//         //         BalancingStage::CheckStart
+//         //     }
+//         // }
+//     };
+//
+//     //let max_delta = cells.iter().map(|cell| *cell - low_cell).max().unwrap();
+//
+//     // let mut i = 1;
+//     // for needs_balancing in unbalanced_cells {
+//     //     writeln!(rtt, "{}: {}", i, needs_balancing);
+//     //     i += 1;
+//     // }
+//     // writeln!(rtt, "max_delta: {}", max_delta).ok();
+//     Ok(())
+// }
