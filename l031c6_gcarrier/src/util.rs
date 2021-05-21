@@ -22,3 +22,17 @@ macro_rules! delay_ms {
        cortex_m::asm::delay(ms2cycles_raw!($clocks, $amount));
    };
 }
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum EventSource {
+    LocalNoForward,
+    LocalForward,
+    RemoteNoForward,
+    RemoteForward,
+}
+
+impl EventSource {
+    pub fn need_to_forward(&self) -> bool {
+        *self == EventSource::LocalForward || *self == EventSource::RemoteForward
+    }
+}

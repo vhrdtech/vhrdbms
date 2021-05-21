@@ -19,12 +19,16 @@ bq769x0 = { path = "../../bq769x0", features = ["crc"] }
 heapless = "0.5"
 hash32 = "0.1"
 cfg-if = "1.0.0"
-tca9535 = { path = "../../tca9535-rs" }
+#tca9535 = { path = "../../tca9535-rs" }
 vhrdcan = { path = "../../vhrdcan" }
 btoi = { version = "0.4.2", default-features = false }
 no-std-compat = "0.4.1"
+uavcan = { path = "../../uavcan" }
+uavcan_bridge = { path = "../../uavcan_bridge" }
 
 [dependencies.stm32l0xx-hal]
+#git = "https://github.com/romixlab/stm32l0xx-hal.git"
+path = "../../stm32l0xx-hal"
 version = "0.6.2"
 features = ["rt", "io-STM32L051", "stm32l0x1", "ufqfpn48"]
 

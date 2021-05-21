@@ -1,12 +1,15 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Check l031c6_gcarrier" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="channel" value="DEFAULT" />
+  <configuration default="false" name="Check l051c8" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="command" value="+nightly check --features=&quot;cli bitbang-i2c&quot;  --color always" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$/l031c6_gcarrier" />
+    <option name="channel" value="DEFAULT" />
+    <option name="requiredFeatures" value="true" />
     <option name="allFeatures" value="false" />
     <option name="emulateTerminal" value="false" />
     <option name="backtrace" value="SHORT" />
-    <option name="workingDirectory" value="file://$PROJECT_DIR$/l031c6_gcarrier" />
     <envs />
+    <option name="isRedirectInput" value="false" />
+    <option name="redirectInputPath" value="" />
     <method v="2">
       <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
     </method>

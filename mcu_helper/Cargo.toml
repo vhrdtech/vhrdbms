@@ -9,5 +9,7 @@ cortex-m = "0.6.3"
 cortex-m-rtic = "0.5.5"
 
 [dependencies.stm32l0xx-hal]
+#git = "https://github.com/romixlab/stm32l0xx-hal.git"
+path = "../../stm32l0xx-hal"
 version = "0.6"
 features = ["rt", "io-STM32L051", "stm32l0x1", "ufqfpn48"]

@@ -9,26 +9,30 @@ extern crate alloc;
 use alloc::boxed::Box;
 
 use stm32l0xx_hal as hal;
-use hal::prelude::*;
-use hal::rcc::MSIRange;
+use hal::{
+    prelude::*,
+    rcc::MSIRange,
+    exti::{GpioLine, ExtiLine, TriggerEdge, Exti},
+    syscfg::SYSCFG,
+    pwr::PWR,
+    pac::Peripherals,
+    rtc::{Instant, RTC, ClockSource as RtcClockSource},
+};
 
 use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin};
 use crate::power_block::PowerBlockId;
 
-use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode, FiltersConfigBuffer0};
-use tca9535::tca9534::Tca9534;
+use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode, FiltersConfigBuffer0, FiltersConfigBuffer1, FiltersMask};
 
 use cfg_if::cfg_if;
-use stm32l0xx_hal::exti::{GpioLine, ExtiLine, TriggerEdge, Exti};
-use stm32l0xx_hal::syscfg::SYSCFG;
 use stm32l0xx_hal::adc::{Precision, SampleTime};
 use vhrdcan::FrameId;
-use stm32l0xx_hal::pwr::PWR;
-use stm32l0xx_hal::pac::Peripherals;
 use bq769x0::BQ769x0;
 
 use crate::tasks;
 use crate::config;
+use stm32l0xx_hal::gpio::AnyPin;
+use crate::tasks::led::ChargeIndicator;
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
@@ -46,48 +50,70 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let clocks = rcc.clocks;
     let mut syscfg = SYSCFG::new(device.SYSCFG, &mut rcc);
     let mut exti = Exti::new(device.EXTI);
-    let mut scb   = core.SCB;
+    let _scb   = core.SCB;
     let mut pwr = PWR::new(device.PWR, &mut rcc);
 
     let gpioa = device.GPIOA.split(&mut rcc);
     let gpiob = device.GPIOB.split(&mut rcc);
     let gpioc = device.GPIOC.split(&mut rcc);
+    let gpioh = device.GPIOH.split(&mut rcc);
 
-    unsafe {
-        let device = Peripherals::steal();
-        device.RCC.csr.modify(|_, w| w.rtcsel().bits(0b00).rtcen().clear_bit().lseon().clear_bit());
-    }
+    // Disable crystal, otherwise PC14 & PC15 won't work. Not needed since crystal is used now.
+    // unsafe {
+    //     let device = Peripherals::steal();
+    //     device.RCC.csr.modify(|_, w| w.rtcsel().bits(0b00).rtcen().clear_bit().lseon().clear_bit());
+    // }
 
-    let mut status_led = gpioc.pc14.into_push_pull_output();
+    // User Feedback
+    // Blue/Green LED
+    let mut status_led = gpiob.pb2.into_push_pull_output();
     status_led.set_high().ok();
     cortex_m::asm::delay(ms2cycles_raw!(clocks, 10));
+    // Red LED
+    let mut error_led = gpiob.pb1.into_push_pull_output();
+    error_led.set_low().ok();
+    // Buzzer
+    let _buzzer = gpioa.pa0.into_analog();
+    // Ring LEDs
+    let mut led1 = gpiob.pb12.into_push_pull_output();
+    let mut led2 = gpiob.pb13.into_push_pull_output();
+    let mut led3 = gpiob.pb14.into_push_pull_output();
+    let mut led4 = gpiob.pb11.into_push_pull_output();
+    let mut led5 = gpioa.pa8.into_push_pull_output();
+    let mut led6 = gpiob.pb15.into_push_pull_output();
+    let charge_indicator = ChargeIndicator {
+        led1, led2, led3, led4, led5, led6
+    };
+
+    // Communication with charger
+    let _charger_comm = gpioc.pc13.into_analog();
+    // Reset for UWB module (hack)
+    let _uwb_reset = gpiob.pb10.into_push_pull_output();
+
 
     // Power switches and DC-DCs
     use PowerBlockType::*;
     use PowerBlockId::*;
     // Be careful with the map size!
     let mut power_blocks = config::PowerBlocksMap::new();
-    // BMS Low Iq DC-DC
-    let mut dcdc_5v0_bms_en = gpioc.pc13.into_push_pull_output();
-    dcdc_5v0_bms_en.set_high().ok();
 
     // Go back to standby mode if button is not pressed (woken by watchdog)
-    let button = gpioa.pa11.into_floating_input();
+    let button = gpioa.pa15.into_floating_input();
     // if button.is_high().unwrap() {
     //     watchdog.feed();
     //     writeln!(rtt, "Back to sleep").ok();
     //     pwr.standby_mode(&mut scb).enter();
     // }
-
+// let x = AnyPin::new(dcdc_5v0_bms_en);
     // Initialize RTC, this date will only be used if RTC is not yet initialised
-    // let instant = Instant::new()
-    //     .set_year(21)
-    //     .set_month(1)
-    //     .set_day(29)
-    //     .set_hour(0)
-    //     .set_minute(0)
-    //     .set_second(0);
-    // let _rtc = RTC::new(device.RTC, &mut rcc, &mut pwr, instant);
+    let instant = Instant::new()
+        .set_year(21)
+        .set_month(1)
+        .set_day(29)
+        .set_hour(0)
+        .set_minute(0)
+        .set_second(0);
+    let _rtc = RTC::new(device.RTC, &mut rcc, RtcClockSource::LSI, &mut pwr, instant);
 
     // Initialize allocator
     // Used only in init to store PowerBlock trait objects in array
@@ -95,95 +121,52 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let size = 512; // in bytes
     unsafe { ALLOCATOR.init(start, size) }
 
-    // let mut pb_5v0_bms: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-    //     DcDc, dcdc_5v0_bms_en, None
+    // +5V0_BMS & +3V3_BMS (Self power, ORed with BQ76920 +3V3_AFE)
+    let mut ps_5v0_bms_en = gpioa.pa3.into_push_pull_output();
+    ps_5v0_bms_en.set_high().ok();
+    // let pb_5v0_bms: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+    //     DcDc, ps_5v0_bms_en, None
     // );
-    // pb_5v0_bms.enable(); // enable right away
-    // let _ = power_blocks.insert(DcDc5V0Bms, Box::new(pb_5v0_bms)); // .expect("I0");
-    // CAN bus transceivers switch U16
-    let ps_5v0_syscan_en = gpioa.pa3.into_push_pull_output();
-    let ps_5v0_syscan_pgood = gpiob.pb3.into_pull_up_input();
-    let pb_5v0_syscan = PowerBlock::new(
-        Switch, ps_5v0_syscan_en, Some(ps_5v0_syscan_pgood)
+    // let _ = power_blocks.insert(DcDc5V0Bms, Box::new(pb_5v0_bms));
+    // +5V0_SYSCAN switch
+    let ps_5v0_syscan_en = gpioa.pa5.into_push_pull_output();
+    let pb_5v0_syscan: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+        Switch, ps_5v0_syscan_en, None
     );
     let _ = power_blocks.insert(Switch5V0Syscan, Box::new(pb_5v0_syscan));
-    // External connector switch U15
-    let ps_5v0_m12_en = gpiob.pb11.into_push_pull_output();
-    let ps_5v0_m12_pgood = gpiob.pb8.into_pull_up_input(); // trace reworked
-    let pb_5v0_m12 = PowerBlock::new(
-        Switch, ps_5v0_m12_en, Some(ps_5v0_m12_pgood)
+    // +3V3_BMS_S0 switch
+    let ps_3v3_s0_en = gpioa.pa4.into_push_pull_output();
+    let pb_3v3_s0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+        Switch, ps_3v3_s0_en, None
     );
-    let _ = power_blocks.insert(Switch5V0M12, Box::new(pb_5v0_m12));
-    // Flex to radars switch U17
-    let ps_5v0_flex_en = gpiob.pb9.into_push_pull_output();
-    let ps_5v0_flex_pgood = gpiob.pb4.into_pull_up_input();
-    let pb_5v0_flex = PowerBlock::new(
-        Switch, ps_5v0_flex_en, Some(ps_5v0_flex_pgood)
+    let _ = power_blocks.insert(Switch3V3S0, Box::new(pb_3v3_s0));
+    // +5V0_UWB switch
+    let ps_5v0_uwb_en = gpiob.pb0.into_push_pull_output();
+    let pb_5v0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
+        Switch, ps_5v0_uwb_en, None
     );
-    let _ = power_blocks.insert(Switch5V0Flex, Box::new(pb_5v0_flex));
-    // 5V0 DC-DC U7
-    let dcdc_5v0_hc_en = gpiob.pb0.into_push_pull_output();
-    let dcdc_5v0_hc_pgood = gpiob.pb2.into_pull_up_input();
-    let pb_5v0_hc = PowerBlock::new(
-        DcDc, dcdc_5v0_hc_en, Some(dcdc_5v0_hc_pgood)
-    );
-    let _ = power_blocks.insert(DcDc5V0Hc, Box::new(pb_5v0_hc));
-    // 3V3 DC-DC U9
-    let dcdc_3v3_hc_en = gpioa.pa8.into_push_pull_output();
-    let dcdc_3v3_hc_pgood = gpiob.pb15.into_pull_up_input();
-    let pb_3v3_hc = PowerBlock::new(
-        DcDc, dcdc_3v3_hc_en, Some(dcdc_3v3_hc_pgood)
-    );
-    let _ = power_blocks.insert(DcDc3V3Hc, Box::new(pb_3v3_hc));
-    // HC switch U13 to DC-DC U9, LC switch U14 to BMS Low Iq DC-DC, OR-ed fault
-    let ps_3v3_uwblc_en = gpiob.pb12.into_push_pull_output();
-    let ps_3v3_uwbhc_en = gpiob.pb6.into_push_pull_output();
-    let ps_3v3_uwb_pgood = gpiob.pb7.into_pull_up_input();
-    let pb_3v3_uwblc: PowerBlock<_, DummyInputPin>   = PowerBlock::new(
-        Switch, ps_3v3_uwblc_en, None
-    );
-    let pb_3v3_uwbhc= PowerBlock::new(
-        Switch, ps_3v3_uwbhc_en, Some(ps_3v3_uwb_pgood)
-    );
-    let _ = power_blocks.insert(Switch3V3UWBLc, Box::new(pb_3v3_uwblc));
-    let _ = power_blocks.insert(Switch3V3UWBHc, Box::new(pb_3v3_uwbhc));
-    // TMS switch U11
-    let ps_3v3_tms_en = gpiob.pb5.into_push_pull_output();
-    let ps_3v3_tms_pgood = gpioc.pc15.into_pull_up_input();
-    let pb_3v3_tms = PowerBlock::new(
-        Switch, ps_3v3_tms_en, Some(ps_3v3_tms_pgood)
-    );
-    let _ = power_blocks.insert(Switch3V3Tms, Box::new(pb_3v3_tms));
-    // IMX DC-DC U6
-    let dcdc_3v8_imx_en = gpiob.pb14.into_push_pull_output();
-    let dcdc_3v8_imx_flt = gpiob.pb1.into_pull_up_input();
-    let pb_3v8_imx = PowerBlock::new(
-        DcDc, dcdc_3v8_imx_en, Some(dcdc_3v8_imx_flt)
-    );
-    let _ = power_blocks.insert(DcDc3V8Imx, Box::new(pb_3v8_imx));
-    // USB switch U12
-    let ps_5v0_usb_en = gpiob.pb13.into_push_pull_output();
-    let ps_5v0_usb_pgood = gpiob.pb10.into_pull_up_input();
-    let pb_5v0_usb = PowerBlock::new(
-        Switch, ps_5v0_usb_en, Some(ps_5v0_usb_pgood)
-    );
-    let _ = power_blocks.insert(Switch5V0Usb, Box::new(pb_5v0_usb));
+    let _ = power_blocks.insert(Switch5V0Uwb, Box::new(pb_5v0));
 
-    // power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).expect("I1").enable();
-    // power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).expect("I1").enable();
-    // power_blocks.get_mut(&PowerBlockId::Switch5V0Syscan).expect("I1").enable();
+    power_blocks.get_mut(&Switch5V0Syscan).unwrap().enable();
+    power_blocks.get_mut(&Switch3V3S0).unwrap().enable();
+    cortex_m::asm::delay(ms2cycles_raw!(clocks, 10));
+
 
     // Enable IRQ on power button input
     let button_line = GpioLine::from_raw_line(button.pin_number()).unwrap();
     exti.listen_gpio(&mut syscfg, button.port(), button_line, TriggerEdge::Falling);
 
     // BQ76920 wake pin
-    let mut afe_wake_pin = gpioa.pa12.into_push_pull_output();
+    let mut afe_wake_pin = gpiob.pb4.into_push_pull_output();
     afe_wake_pin.set_high().ok();
     cortex_m::asm::delay(100_000);
     afe_wake_pin.set_low().ok();
-    // Charge voltage sense, divider enable on TCA9534.P3
-    let vchg_div_pin = gpioa.pa2.into_analog();
+
+    // ADC channels
+    let pack_div_en_pin = gpiob.pb9.into_push_pull_output();
+    let pack_div_pin = gpioa.pa6.into_analog();
+    let bat_div_en_pin = gpioa.pa2.into_push_pull_output();
+    let bat_div_pin = gpioa.pa7.into_analog();
     let mut adc = device.ADC.constrain(&mut rcc);
     unsafe {
         let device = hal::pac::Peripherals::steal();
@@ -196,25 +179,21 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // let mut adc = Adc::new(device.ADC, &mut rcc);
     adc.set_precision(Precision::B_12);
     adc.set_sample_time(SampleTime::T_160_5);
-    let afe_io = tasks::bms::AfeIo {
-        afe_wake_pin,
-        vchg_div_pin,
-        dcdc_en_pin: dcdc_5v0_bms_en
-    };
+
 
     // SPI<->CANBus MCP25625T-E/ML
     let mcp_freq = 1.mhz();
     // GPIO init
-    let mcp25625_irq         = gpioa.pa1.into_pull_down_input();
+    let mcp25625_irq         = gpioa.pa10.into_pull_up_input();
     let mcp_int_line = GpioLine::from_raw_line(mcp25625_irq.pin_number()).unwrap();
     exti.listen_gpio(&mut syscfg, mcp25625_irq.port(), mcp_int_line, TriggerEdge::Falling);
-    let mcp_stby         = gpioa.pa0; // NORMAL mode is low, SLEEP is high
-    let mcp_cs         = gpioa.pa4;
-    let mcp_sck         = gpioa.pa5;
-    let mcp_miso         = gpioa.pa6;
-    let mcp_mosi         = gpioa.pa7;
-    let mut mcp_stby = mcp_stby.into_push_pull_output();
-    mcp_stby.set_low().ok();
+    // let mcp_stby         = gpioa.pa0; // NORMAL mode is low, SLEEP is high
+    let mcp_cs         = gpioa.pa9;
+    let mcp_sck         = gpiob.pb3;
+    let mcp_miso         = gpioa.pa11;
+    let mcp_mosi         = gpioa.pa12;
+    // let mut mcp_stby = mcp_stby.into_push_pull_output();
+    // mcp_stby.set_low().ok();
     let mut mcp_cs = mcp_cs.into_push_pull_output();
     mcp_cs.set_high().ok();
     // SPI init
@@ -229,11 +208,18 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     cortex_m::asm::delay(100_000);
     let mut mcp25625 = MCP25625::new(spi, mcp_cs, one_cp);
     let filters_buffer0 = FiltersConfigBuffer0 {
-        mask: vhrdcan::EXTENDED_ID_ALL_BITS,
+        mask: FiltersMask::AllExtendedIdBits,
         filter0: config::SOFTOFF_NOTIFY_FRAME_ID,
-        filter1: Some(FrameId::new_standard(0x123).unwrap())
+        filter1: Some(FrameId::new_extended(0x19992350).unwrap())
     };
-    let filters_config = FiltersConfig::Filter(filters_buffer0, None);
+    let filters_buffer1 = FiltersConfigBuffer1 {
+        mask: FiltersMask::OnlyStandardIdBits,
+        filter2: config::POWER_CONTROL_FRAME_ID,
+        filter3: None,
+        filter4: None,
+        filter5: None,
+    };
+    let filters_config = FiltersConfig::Filter(filters_buffer0, Some(filters_buffer1));
     let mcp_config = MCP25625Config {
         brp: 0, // Fosc=16MHz
         prop_seg: 3,
@@ -242,7 +228,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         sync_jump_width: 2,
         rollover_to_buffer1: true,
         filters_config,
-        //filters_config: FiltersConfig::ReceiveAll,
+        // filters_config: FiltersConfig::ReceiveAll,
         operation_mode: McpOperationMode::Normal
     };
     let r = mcp25625.apply_config(mcp_config);
@@ -252,10 +238,35 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let can_tx = config::CanTX::new();
     let can_rx = config::CanRX::new();
 
+    // Power control
+    // Enable predischarge MOSFET with current inrush limiting
+    let mut predischarge_en = gpioa.pa1.into_push_pull_output();
+    predischarge_en.set_low().ok();
+    // Override CHG line from AFE to gate driver
+    let mut afe_chg_override = gpioh.ph1.into_push_pull_output();
+    afe_chg_override.set_low().ok();
+    // Override DSG line from AFE to gate driver
+    let mut afe_dsg_override = gpioh.ph0.into_push_pull_output();
+    afe_dsg_override.set_low().ok();
+    // Disable zero voltage charging, enabled by default (depletion FET)
+    // let mut zvchg_disable = gpiob.pb8.into_push_pull_output();
+    let mut precharge_enable = gpiob.pb8.into_push_pull_output();
+    precharge_enable.set_low().ok();
+    let afe_io = tasks::bms::AfeIo {
+        afe_wake_pin,
+        dcdc_en_pin: ps_5v0_bms_en,
+        pack_div_en_pin,
+        pack_div_pin,
+        bat_div_en_pin,
+        bat_div_pin,
+        afe_chg_override,
+        afe_dsg_override
+    };
+
+
     // Internal I2C to AFE and Gauge
-    //use crc_any::CRCu8;
-    let scl = gpioa.pa9.into_open_drain_output();
-    let sda = gpioa.pa10.into_open_drain_output();
+    let scl = gpiob.pb6.into_open_drain_output();
+    let sda = gpiob.pb7.into_open_drain_output();
     cfg_if! {
             if #[cfg(feature = "bitbang-i2c")] {
                 let i2c_timer = device.TIM2.timer(200.khz(), &mut rcc);
@@ -264,8 +275,6 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
                 let mut i2c = device.I2C1.i2c(sda, scl, 100.khz(), &mut rcc);
             }
         }
-    // Prepare crc8 library
-    //let mut crc8 = CRCu8::crc8();
     // Prepare bq76920 config
     let mut bq76920 = BQ769x0::new(0x08);
     match crate::tasks::bms::afe_init(&mut i2c, &mut bq76920) {
@@ -282,14 +291,9 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // let r = bq76920.discharge(&mut i2c, true);
     // let _ = writeln!(rtt, "DE: {:?}", r);
 
-    let tca9534 = Tca9534::new(&mut i2c, tca9535::Address::ADDR_0x20);
-    let r = tca9534.write_config(&mut i2c, tca9535::tca9534::Port::empty());
-    let _ = writeln!(rtt, "tca9534: {}", r.is_ok());
-    let _ = tca9534.write_outputs(&mut i2c, tca9535::tca9534::Port::empty());
-
     cx.spawn.watchdog().unwrap();
     cx.spawn.bms_event(tasks::bms::BmsEvent::CheckAfe).unwrap();
-    cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
+    // cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
     cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
     cx.spawn.blinker(tasks::led::Event::Toggle).unwrap();
     rtic::pend(config::BUTTON_IRQ); // if we got to this point, button was pressed
@@ -313,10 +317,10 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         i2c,
         bq76920,
         power_blocks,
-        tca9534,
         exti,
         button,
         button_state,
-        softoff_state
+        softoff_state,
+         charge_indicator,
     }
 }

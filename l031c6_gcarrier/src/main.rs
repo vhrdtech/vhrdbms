@@ -10,7 +10,7 @@ mod config;
 mod power_block;
 mod board_components;
 
-use core::fmt::Write;
+// use core::fmt::Write;
 use jlink_rtt::NonBlockingOutput;
 extern crate alloc;
 
@@ -34,7 +34,7 @@ const APP: () = {
         bms_state: tasks::bms::BmsState,
         afe_io: tasks::bms::AfeIo,
         adc: Adc<hal::adc::Ready>,
-        status_led: PC14<Output<PushPull>>,
+        status_led: PB2<Output<PushPull>>,
         rtt: NonBlockingOutput,
         mcp25625: config::Mcp25625Instance,
         mcp25625_irq: config::Mcp25625Irq,
@@ -43,11 +43,11 @@ const APP: () = {
         i2c: config::InternalI2c,
         bq76920: bq769x0::BQ769x0,
         power_blocks: config::PowerBlocksMap,
-        tca9534: tca9535::tca9534::Tca9534<config::InternalI2c>,
         exti: Exti,
         button: config::ButtonPin,
         button_state: tasks::button::ButtonState,
-        softoff_state: tasks::softoff::State
+        softoff_state: tasks::softoff::State,
+        charge_indicator: tasks::led::ChargeIndicator
     }
 
     #[init(
@@ -65,9 +65,9 @@ const APP: () = {
             bq76920,
             rtt,
             power_blocks,
-            tca9534,
             adc,
-            afe_io
+            afe_io,
+            can_tx,
         ],
         capacity = 8,
         schedule = [
@@ -89,6 +89,7 @@ const APP: () = {
             &clocks,
             status_led,
             can_tx,
+            charge_indicator,
             rtt
         ],
         schedule = [
@@ -97,7 +98,8 @@ const APP: () = {
     )]
     fn blinker(cx: blinker::Context, e: tasks::led::Event) {
         static mut STATE: bool = false;
-        tasks::led::blinker(cx, e, STATE);
+        static mut COUNTER: u8 = 0;
+        tasks::led::blinker(cx, e, STATE, COUNTER);
     }
 
     #[task(
@@ -120,7 +122,7 @@ const APP: () = {
             &clocks,
             can_tx
         ],
-        schedule = [api]
+        schedule = [api],
     )]
     fn api(cx: api::Context, e: tasks::api::Event) {
         tasks::api::api(cx, e);
@@ -132,7 +134,7 @@ const APP: () = {
             can_rx,
             rtt
         ],
-        spawn = [bms_event],
+        spawn = [bms_event, softoff],
         schedule = []
     )]
     fn can_rx(cx: can_rx::Context) {
@@ -152,22 +154,22 @@ const APP: () = {
         tasks::softoff::softoff(cx);
     }
 
-    #[task(
-        binds = EXTI0_1,
-        resources = [
-            &clocks,
-            exti,
-            mcp25625,
-            mcp25625_irq,
-            can_tx,
-            can_rx,
-            rtt
-        ],
-        spawn = [can_rx]
-    )]
-    fn canctrl_irq(cx: canctrl_irq::Context) {
-        tasks::canbus::canctrl_irq(cx);
-    }
+    // #[task(
+    //     binds = EXTI0_1,
+    //     resources = [
+    //         &clocks,
+    //         exti,
+    //         mcp25625,
+    //         mcp25625_irq,
+    //         can_tx,
+    //         can_rx,
+    //         rtt
+    //     ],
+    //     spawn = [can_rx]
+    // )]
+    // fn canctrl_irq(cx: canctrl_irq::Context) {
+    //     tasks::canbus::canctrl_irq(cx);
+    // }
 
     #[task(
         binds = EXTI4_15,
@@ -175,11 +177,22 @@ const APP: () = {
             &clocks,
             button,
             button_state,
+            mcp25625,
+            mcp25625_irq,
+            can_tx,
+            can_rx,
+            rtt
         ],
-        spawn = [button_event]
+        spawn = [button_event, can_rx]
     )]
-    fn button_irq(cx: button_irq::Context) {
-        tasks::button::button_irq(cx);
+    fn exti4_15(mut cx: exti4_15::Context) {
+        let nvic = cortex_m::peripheral::NVIC::is_pending(CAN_TX_HANDLER);
+        use core::fmt::Write;
+        let pr = unsafe { (*stm32l0xx_hal::pac::EXTI::ptr()).pr.read().bits() };
+
+        // writeln!(cx.resources.rtt, "exti {:32b} nvic:{}", pr, nvic);
+        tasks::canbus::canctrl_irq(&mut cx);
+        tasks::button::button_irq(&mut cx);
     }
 
     #[task(
@@ -197,7 +210,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, power_blocks, tca9534],
+        resources = [i2c, bq76920, rtt, power_blocks, afe_io, mcp25625],
         spawn = [bms_event]
     )]
     fn idle(cx: idle::Context) -> ! {
@@ -222,11 +235,14 @@ fn oom(_: Layout) -> ! {
 }
 
 use core::panic::PanicInfo;
+use stm32l0xx_hal::gpio::gpiob::PB2;
+use crate::config::CAN_TX_HANDLER;
+
 #[inline(never)]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     cortex_m::asm::delay(6_000_000);
-    let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
-    writeln!(rtt, "{:?}", _info).ok();
+    // let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
+    // writeln!(rtt, "{:?}", _info).ok();
     cortex_m::peripheral::SCB::sys_reset(); // -> !
 }

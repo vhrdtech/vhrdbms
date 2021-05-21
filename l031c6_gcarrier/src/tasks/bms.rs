@@ -2,7 +2,6 @@ use crate::{config, tasks};
 use bq769x0::{BQ769x0, MilliVolts};
 use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
-use tca9535::tca9534::{Tca9534};
 //use crate::hal::prelude::_embedded_hal_adc_OneShot;
 use jlink_rtt::NonBlockingOutput;
 use stm32l0xx_hal::prelude::OutputPin;
@@ -12,6 +11,7 @@ use mcu_helper::color;
 use bq769x0::{SCDDelay, Amperes, OCDDelay, MicroOhms, UVDelay, OVDelay};
 use bq769x0::Config as BQ769x0Config;
 use crate::power_block::PowerBlockId;
+use crate::util::EventSource;
 
 #[derive(Debug)]
 pub struct PowerRailCommand {
@@ -22,9 +22,9 @@ pub struct PowerRailCommand {
 
 #[derive(Debug)]
 pub enum BmsEvent {
-    TogglePower,
-    PowerOff,
-    PowerOn,
+    TogglePower(EventSource),
+    PowerOff(EventSource),
+    PowerOn(EventSource),
     CheckAfe,
     CheckBalancing,
     Halt,
@@ -57,8 +57,13 @@ impl From<bq769x0::Error> for Error {
 
 pub struct AfeIo {
     pub afe_wake_pin: config::AfeWakePin,
-    pub vchg_div_pin: config::VchgDivPin,
     pub dcdc_en_pin: config::DcDcEnPin,
+    pub pack_div_en_pin: config::PackDivEnPin,
+    pub pack_div_pin: config::PackDivPin,
+    pub bat_div_en_pin: config::BatDivEnPin,
+    pub bat_div_pin: config::BatDivPin,
+    pub afe_chg_override: config::AfeChgOverridePin,
+    pub afe_dsg_override: config::AfeDsgOverridePin,
 }
 
 enum BalancingStage {
@@ -87,6 +92,21 @@ impl Default for BalancingState {
             stage: BalancingStage::default(),
             phase1: 0,
             phase2: 0
+        }
+    }
+}
+
+pub enum CellCount {
+    _3S,
+    _4S,
+    _5S,
+}
+impl CellCount {
+    pub fn cells_mask(&self) -> u16 {
+        match self {
+            CellCount::_3S => { 0b10011 }
+            CellCount::_4S => { 0b10111 }
+            CellCount::_5S => { 0b11111 }
         }
     }
 }
@@ -139,7 +159,6 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let bq769x0: &mut BQ769x0 = cx.resources.bq76920;
     let rtt = cx.resources.rtt;
     let power_blocks = cx.resources.power_blocks;
-    let tca9534: &mut Tca9534<config::InternalI2c> = cx.resources.tca9534;
     let clocks = cx.resources.clocks;
     let _adc = cx.resources.adc;
     let afe_io: &mut AfeIo = cx.resources.afe_io;

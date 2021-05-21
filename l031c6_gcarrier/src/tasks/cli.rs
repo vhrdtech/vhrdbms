@@ -1,17 +1,40 @@
 use bq769x0::{BQ769x0};
 use core::fmt::Write;
-use crate::config;
+use crate::{config, tasks};
 use mcu_helper::color;
 use crate::power_block::PowerBlockId;
 use core::convert::TryFrom;
-use tca9535::tca9534::Tca9534;
-use crate::config::TCA_MXM_BOOT_SRC_PIN;
 use crate::tasks::bms::BmsEvent;
 // use power_helper::power_block::PowerBlockControl;
 // use stm32l0xx_hal::prelude::OutputPin;
 use btoi::{btoi, ParseIntegerError, btoi_radix};
 use no_std_compat::prelude::v1::*;
 use crate::hal::prelude::*;
+use mcp25625::MCP25625;
+
+macro_rules! ok_or_return {
+    ($e: expr, $fmt: ident, $message: expr) => {
+        match $e {
+            Ok(x) => x,
+            Err(_) => {
+                writeln!($fmt, "{}{}{}", color::YELLOW, $message, color::DEFAULT).ok();
+                return;
+            }
+        }
+    }
+}
+
+macro_rules! some_or_return {
+    ($e: expr, $fmt: ident, $message: expr) => {
+        match $e {
+            Some(x) => x,
+            None => {
+                writeln!($fmt, "{}{}{}", color::YELLOW, $message, color::DEFAULT).ok();
+                return;
+            }
+        }
+    }
+}
 
 fn print_str_array(strs: &[&str], fmt: &mut dyn core::fmt::Write) {
     write!(fmt, "{}", color::YELLOW).ok();
@@ -29,8 +52,9 @@ pub fn cli(
     i2c: &mut config::InternalI2c,
     bq769x0: &mut BQ769x0,
     power_blocks: &mut config::PowerBlocksMap,
-    tca9534: &mut Tca9534<config::InternalI2c>,
-    spawn: crate::idle::Spawn
+    spawn: crate::idle::Spawn,
+    afe_io: &mut tasks::bms::AfeIo,
+    mcp25625: &mut config::Mcp25625Instance
 ) {
     let mut rtt_down = [0u8; 128];
     let rtt_down_len = jlink_rtt::try_read(&mut rtt_down);
@@ -49,16 +73,10 @@ pub fn cli(
                             writeln!(rtt, "cmds: afe, pb, imx, reset, halt, tms").ok();
                         },
                         "afe" => {
-                            afe_command(&mut args, i2c, bq769x0, rtt);
+                            afe_command(&mut args, i2c, bq769x0, afe_io, rtt);
                         },
                         "pb" => {
                             power_blocks_command(&mut args, power_blocks, rtt);
-                        },
-                        "imx" => {
-                            imx_command(&mut args, i2c, tca9534, rtt);
-                        },
-                        "tms" => {
-                            tms_command(&mut args, i2c, tca9534, power_blocks, rtt);
                         },
                         "reset" => {
                             cortex_m::peripheral::SCB::sys_reset(); // -> !
@@ -68,6 +86,9 @@ pub fn cli(
                         },
                         "i2c" => {
                             i2c_command(&mut args, i2c, rtt);
+                        },
+                        "mcp" => {
+                            mcp_command(&mut args, mcp25625, rtt);
                         },
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
@@ -105,7 +126,8 @@ fn afe_command(
     args: &mut core::str::SplitAsciiWhitespace,
     i2c: &mut config::InternalI2c,
     bq769x0: &mut BQ769x0,
-    fmt: &mut dyn core::fmt::Write
+    afe_io: &mut tasks::bms::AfeIo,
+    fmt: &mut dyn core::fmt::Write,
 ) {
     let afe_part = args.next();
     match afe_part {
@@ -113,20 +135,48 @@ fn afe_command(
             let part_cmd = args.next();
             match afe_part {
                 "dsg" => {
-                    match one_of(part_cmd, &["off", "on"], fmt) {
+                    match one_of(part_cmd, &["off", "on", "ovrd"], fmt) {
                         Some(offon) => {
-                            let r = crate::tasks::bms::afe_discharge(i2c, bq769x0, offon != 0);
-                            writeln!(fmt, "DSG en: {:?}", r).ok();
+                            match offon {
+                                0 => {
+                                    let r = crate::tasks::bms::afe_discharge(i2c, bq769x0, false);
+                                    writeln!(fmt, "DSG en: {:?}", r).ok();
+                                    afe_io.afe_dsg_override.set_low().ok();
+                                },
+                                1 => {
+                                    let r = crate::tasks::bms::afe_discharge(i2c, bq769x0, true);
+                                    writeln!(fmt, "DSG en: {:?}", r).ok();
+                                },
+                                2 => {
+                                    writeln!(fmt, "{}DSG OVRD{}", color::RED, color::DEFAULT).ok();
+                                    afe_io.afe_dsg_override.set_high().ok();
+                                },
+                                _ => {}
+                            }
                         },
                         None => {}
                     }
                     return;
                 },
                 "chg" => {
-                    match one_of(part_cmd, &["off", "on"], fmt) {
+                    match one_of(part_cmd, &["off", "on", "ovrd"], fmt) {
                         Some(offon) => {
-                            let r = bq769x0.charge(i2c, offon != 0);
-                            writeln!(fmt, "{:?}", r).ok();
+                            match offon {
+                                0 => {
+                                    let r = bq769x0.charge(i2c, false);
+                                    writeln!(fmt, "{:?}", r).ok();
+                                    afe_io.afe_chg_override.set_low().ok();
+                                },
+                                1 => {
+                                    let r = bq769x0.charge(i2c, true);
+                                    writeln!(fmt, "{:?}", r).ok();
+                                },
+                                2 => {
+                                    afe_io.afe_chg_override.set_high().ok();
+                                    writeln!(fmt, "{}CHG OVRD{}", color::RED, color::DEFAULT).ok();
+                                },
+                                _ => {},
+                            }
                         },
                         None => {}
                     }
@@ -148,10 +198,13 @@ fn afe_command(
                     return;
                 },
                 "cells" => {
+                    let balancing_state = bq769x0.balancing_state(i2c).unwrap_or(0);
                     match bq769x0.cell_voltages(i2c) {
                         Ok(cells) => {
                             for (i, cell) in cells.iter().enumerate() {
-                                let _ = writeln!(fmt, "C{}: {}", i + 1, cell);
+                                let is_balancing = balancing_state & (1 << i) != 0;
+                                let is_balancing = if is_balancing { " [BAL]" } else { "" };
+                                let _ = writeln!(fmt, "C{}: {}{}", i + 1, cell, is_balancing);
                             }
                         }
                         Err(e) => {
@@ -177,13 +230,40 @@ fn afe_command(
                         }
                     }
                     return;
+                },
+                "bal" => {
+                    let subcmd = some_or_return!(part_cmd, fmt, "bal en <n>/show/off");
+                    match subcmd {
+                        "en" => {
+                            let cells = some_or_return!(args.next(), fmt, "bal en 10101");
+                            let cells: Result<u8, ParseIntegerError> = btoi_radix(cells.as_bytes(), 2);
+                            let cells = ok_or_return!(cells, fmt, "not a binary number");
+                            if (cells & 0b10101 != 0) && (cells & 0b01010 != 0) {
+                                writeln!(fmt, "Cannot balance consecutive cells!").ok();;
+                                return;
+                            }
+                            writeln!(fmt, "Enabling balance: {:?}", bq769x0.enable_balancing(i2c, cells)).ok();;
+                        },
+                        "off" => {
+                            let r = bq769x0.enable_balancing(i2c, 0);
+                            writeln!(fmt, "Balancing off {:?}", r).ok();;
+                        },
+                        "show" => {
+                            let r = bq769x0.balancing_state(i2c);
+                            writeln!(fmt, "Balancing (C5:C1): {:05b}", r.unwrap_or(0)).ok();;
+                        },
+                        _ => {
+                            writeln!(fmt, "Unknown command").ok();
+                        }
+                    }
+                    return;
                 }
-                _ => {}
+                _ => { writeln!(fmt, "Unknown command").ok(); }
             }
         },
         None => {}
     }
-    writeln!(fmt, "{}dsg, chg, stat, cells, vi!{}", color::YELLOW, color::DEFAULT).ok();
+    writeln!(fmt, "{}dsg, chg, stat, cells, vi, bal!{}", color::YELLOW, color::DEFAULT).ok();
 }
 
 fn power_blocks_command(
@@ -235,128 +315,7 @@ fn power_blocks_command(
                 _ => unreachable!()
             }
         },
-        _ => {}
-    }
-}
-
-fn imx_command(
-    args: &mut core::str::SplitAsciiWhitespace,
-    i2c: &mut config::InternalI2c,
-    tca9534: &mut Tca9534<config::InternalI2c>,
-    fmt: &mut dyn core::fmt::Write
-) {
-    let subcmd = match args.next() {
-        Some(subcmd) => subcmd,
-        None => {
-            writeln!(fmt, "{}imx push/rel/usd/emmc{}", color::YELLOW, color::DEFAULT).ok();
-            return;
-        }
-    };
-    use tca9535::tca9534::Port;
-    let r = match subcmd {
-        "rel" => {
-            tca9534.modify_outputs(i2c, config::TCA_MXM_ON_OFF_PIN, Port::empty()) // 0 = release on/off button
-        },
-        "push" => {
-            tca9534.modify_outputs(i2c, config::TCA_MXM_ON_OFF_PIN, config::TCA_MXM_ON_OFF_PIN) // 1 = push on/off button
-        },
-        "emmc" => {
-            tca9534.modify_outputs(i2c, config::TCA_MXM_BOOT_SRC_PIN, Port::empty()) // 0 = eMMC
-        },
-        "usd" => {
-            tca9534.modify_outputs(i2c, config::TCA_MXM_BOOT_SRC_PIN, TCA_MXM_BOOT_SRC_PIN) // 1 = uSD
-        },
-        _ => {
-            writeln!(fmt, "{}wrong command{}", color::YELLOW, color::DEFAULT).ok();
-            return;
-        }
-    };
-    match r {
-        Ok(_) => {
-            writeln!(fmt, "{}ok{}", color::GREEN, color::DEFAULT).ok();
-        },
-        Err(_) => {
-            writeln!(fmt, "{}error{}", color::RED, color::DEFAULT).ok();
-        }
-    }
-}
-
-fn tms_command(
-    args: &mut core::str::SplitAsciiWhitespace,
-    i2c: &mut config::InternalI2c,
-    tca9534: &mut Tca9534<config::InternalI2c>,
-    power_blocks: &mut config::PowerBlocksMap,
-    fmt: &mut dyn core::fmt::Write
-) {
-    let subcmd = match args.next() {
-        Some(subcmd) => subcmd,
-        None => {
-            writeln!(fmt, "{}tms run/jtag/tdo0/tdoz{}", color::YELLOW, color::DEFAULT).ok();
-            return;
-        }
-    };
-    use tca9535::tca9534::Port;
-    let r = match subcmd {
-        "run" => {
-            power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).unwrap().disable();
-            let r = tca9534.modify_outputs(i2c, config::TCA_TMS_TDO_PIN, Port::empty());
-            cortex_m::asm::delay(500_000);
-            power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).unwrap().enable();
-            power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).unwrap().enable();
-            r
-        },
-        "jtag" => {
-            power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).unwrap().disable();
-            let _ = tca9534.modify_outputs(i2c, config::TCA_TMS_TDO_PIN, config::TCA_TMS_TDO_PIN);
-            cortex_m::asm::delay(500_000);
-            power_blocks.get_mut(&PowerBlockId::DcDc3V3Hc).unwrap().enable();
-            power_blocks.get_mut(&PowerBlockId::Switch3V3Tms).unwrap().enable();
-            cortex_m::asm::delay(500_000);
-            let r = tca9534.modify_outputs(i2c, config::TCA_TMS_TDO_PIN, Port::empty());
-            r
-        },
-        "tdo0" => {
-            tca9534.modify_outputs(i2c, config::TCA_TMS_TDO_PIN, config::TCA_TMS_TDO_PIN)
-        },
-        "tdoz" => {
-            tca9534.modify_outputs(i2c, config::TCA_TMS_TDO_PIN, Port::empty())
-        },
-        _ => {
-            writeln!(fmt, "{}wrong command{}", color::YELLOW, color::DEFAULT).ok();
-            return;
-        }
-    };
-    match r {
-        Ok(_) => {
-            writeln!(fmt, "{}ok{}", color::GREEN, color::DEFAULT).ok();
-        },
-        Err(_) => {
-            writeln!(fmt, "{}error{}", color::RED, color::DEFAULT).ok();
-        }
-    }
-}
-
-macro_rules! ok_or_return {
-    ($e: expr, $fmt: ident, $message: expr) => {
-        match $e {
-            Ok(x) => x,
-            Err(_) => {
-                writeln!($fmt, "{}{}{}", color::YELLOW, $message, color::DEFAULT).ok();
-                return;
-            }
-        }
-    }
-}
-
-macro_rules! some_or_return {
-    ($e: expr, $fmt: ident, $message: expr) => {
-        match $e {
-            Some(x) => x,
-            None => {
-                writeln!($fmt, "{}{}{}", color::YELLOW, $message, color::DEFAULT).ok();
-                return;
-            }
-        }
+        _ => { writeln!(fmt, "Unknown command").ok(); }
     }
 }
 
@@ -413,6 +372,49 @@ fn i2c_command(
 
             }
         },
-        _ => {}
+        _ => { writeln!(fmt, "Unknown command").ok(); }
     };
+}
+
+fn mcp_command(
+    args: &mut core::str::SplitAsciiWhitespace,
+    mcp25625: &mut config::Mcp25625Instance,
+    fmt: &mut dyn core::fmt::Write
+) {
+    let subcmd = some_or_return!(args.next(), fmt, "mcp dump");
+    match subcmd {
+        "dump" => {
+            writeln!(fmt, "\n\nRXF0-RXF2:").ok();
+            for addr in 0b0000_0000..=0b0000_1011 {
+                let reg = mcp25625.read_reg(addr);
+                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            }
+            writeln!(fmt, "\n\nRXF3-RXF5:").ok();
+            for addr in 0b0001_0000..=0b0001_1011 {
+                let reg = mcp25625.read_reg(addr);
+                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            }
+            writeln!(fmt, "\n\nRXM0-RXM1:").ok();
+            for addr in 0b0010_0000..=0b0010_0111 {
+                let reg = mcp25625.read_reg(addr);
+                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            }
+            writeln!(fmt, "\n\nTXB0:").ok();
+            for addr in 0b0011_0000..=0b0011_1101 {
+                let reg = mcp25625.read_reg(addr);
+                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            }
+            writeln!(fmt, "\n\nTXB1:").ok();
+            for addr in 0b0100_0000..=0b100_1101 {
+                let reg = mcp25625.read_reg(addr);
+                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            }
+            writeln!(fmt, "\n\nTXB2:").ok();
+            for addr in 0b0101_0000..=0b0101_1101 {
+                let reg = mcp25625.read_reg(addr);
+                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            }
+        },
+        _ => { writeln!(fmt, "Unknown command").ok(); }
+    }
 }
