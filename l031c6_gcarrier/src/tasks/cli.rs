@@ -430,7 +430,7 @@ fn print_stack_usage(
         if unsafe { p.offset(i as isize).read() } == STACK_PROBE_MAGICWORD {
             untouched_words += 1;
         } else {
-            writeln!(fmt, "Min free: {}B", untouched_words * 4);
+            writeln!(fmt, "Min free: {}B", untouched_words * 4).ok();
             break;
         }
     }

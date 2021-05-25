@@ -8,3 +8,4 @@ pub mod bms;
 pub mod api;
 pub mod softoff;
 pub mod led;
+pub mod beeper;

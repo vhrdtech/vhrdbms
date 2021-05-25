@@ -47,7 +47,8 @@ const APP: () = {
         button: config::ButtonPin,
         button_state: tasks::button::ButtonState,
         softoff_state: tasks::softoff::State,
-        charge_indicator: tasks::led::ChargeIndicator
+        charge_indicator: tasks::led::ChargeIndicator,
+        buzzer_pwm_channel: tasks::beeper::BuzzerPwmChannel,
     }
 
     #[init(
@@ -214,6 +215,15 @@ const APP: () = {
     )]
     fn idle(cx: idle::Context) -> ! {
         tasks::idle::idle(cx);
+    }
+
+    #[task(
+        resources = [buzzer_pwm_channel],
+        schedule = [beeper]
+    )]
+    fn beeper(cx: beeper::Context, e: tasks::beeper::Event) {
+        static mut STATE: u32 = 0;
+        tasks::beeper::beeper(cx, e, STATE);
     }
 
     extern "C" {

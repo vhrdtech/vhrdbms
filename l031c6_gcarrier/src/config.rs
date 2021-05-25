@@ -33,7 +33,7 @@ pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI4_15;
 #[cfg(not(feature = "bitbang-i2c"))]
 pub type InternalI2c = hal::i2c::I2c<hal::pac::I2C1, PA10<Output<OpenDrain>>, PA9<Output<OpenDrain>>>;
 #[cfg(feature = "bitbang-i2c")]
-pub type InternalI2c = bitbang_hal::i2c::I2cBB<PB6<Output<OpenDrain>>, PB7<Output<OpenDrain>>, hal::timer::Timer<hal::pac::TIM2>>;
+pub type InternalI2c = bitbang_hal::i2c::I2cBB<PB6<Output<OpenDrain>>, PB7<Output<OpenDrain>>, hal::timer::Timer<hal::pac::TIM6>>;
 
 use stm32l0xx_hal::gpio::{Input, Floating, PullUp};
 

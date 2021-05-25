@@ -32,6 +32,7 @@ use crate::tasks;
 use crate::config;
 use crate::tasks::led::ChargeIndicator;
 use crate::util::{current_stack_pointer, stack_upper_bound, stack_lower_bound};
+use stm32l0xx_hal::pwm;
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let free_stack_bytes = current_stack_pointer() - stack_lower_bound();
@@ -45,7 +46,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
 
     let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
     writeln!(rtt, "{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")).ok();
-    writeln!(rtt, "free: {}B", free_stack_bytes);
+    writeln!(rtt, "free: {}B", free_stack_bytes).ok();
 
     let core/*: cortex_m::Peripherals */= cx.core;
     let device: hal::pac::Peripherals = cx.device;
@@ -82,7 +83,9 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut error_led = gpiob.pb1.into_push_pull_output();
     error_led.set_low().ok();
     // Buzzer
-    let _buzzer = gpioa.pa0.into_analog();
+    let pwm = pwm::Timer::new(device.TIM2, 360.hz(), &mut rcc);
+    let buzzer = gpioa.pa0;
+    let buzzer_pwm_channel = pwm.channel1.assign(buzzer);
     // Ring LEDs
     let led1 = gpiob.pb12.into_push_pull_output();
     let led2 = gpiob.pb13.into_push_pull_output();
@@ -151,7 +154,10 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // );
     // let _ = power_blocks.insert(Switch3V3S0, Box::new(pb_3v3_s0));
     // +5V0_UWB switch
-    let ps_5v0_uwb_en = gpiob.pb0.into_push_pull_output();
+    let mut ps_5v0_uwb_en = gpiob.pb0.into_push_pull_output();
+    ps_5v0_uwb_en.set_high().ok();
+    cortex_m::asm::delay(4_000_000);
+    ps_5v0_uwb_en.set_low().ok();
     // let pb_5v0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
     //     Switch, ps_5v0_uwb_en, None
     // );
@@ -281,7 +287,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let sda = gpiob.pb7.into_open_drain_output();
     cfg_if! {
             if #[cfg(feature = "bitbang-i2c")] {
-                let i2c_timer = device.TIM2.timer(200.khz(), &mut rcc);
+                let i2c_timer = device.TIM6.timer(200.khz(), &mut rcc);
                 let mut i2c = bitbang_hal::i2c::I2cBB::new(scl, sda, i2c_timer);
             } else {
                 let mut i2c = device.I2C1.i2c(sda, scl, 100.khz(), &mut rcc);
@@ -333,6 +339,8 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         button,
         button_state,
         softoff_state,
-         charge_indicator,
+        charge_indicator,
+        buzzer_pwm_channel,
+
     }
 }
