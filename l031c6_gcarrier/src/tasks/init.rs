@@ -31,10 +31,21 @@ use bq769x0::BQ769x0;
 use crate::tasks;
 use crate::config;
 use crate::tasks::led::ChargeIndicator;
+use crate::util::{current_stack_pointer, stack_upper_bound, stack_lower_bound};
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
+    let free_stack_bytes = current_stack_pointer() - stack_lower_bound();
+    unsafe {
+        let mut p = stack_lower_bound() as *mut u32;
+        let free_stack_words = free_stack_bytes / 4;
+        for i in 0..free_stack_words {
+            p.offset(i as isize).write(crate::util::STACK_PROBE_MAGICWORD);
+        }
+    }
+
     let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
     writeln!(rtt, "{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")).ok();
+    writeln!(rtt, "free: {}B", free_stack_bytes);
 
     let core/*: cortex_m::Peripherals */= cx.core;
     let device: hal::pac::Peripherals = cx.device;

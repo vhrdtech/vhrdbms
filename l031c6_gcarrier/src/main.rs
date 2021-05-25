@@ -2,6 +2,7 @@
 #![no_std]
 // #![feature(alloc_error_handler)]
 #![feature(const_option)]
+#![feature(asm)]
 
 #[macro_use]
 mod util;

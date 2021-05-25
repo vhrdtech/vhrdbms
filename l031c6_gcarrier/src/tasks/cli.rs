@@ -87,6 +87,9 @@ pub fn cli(
                         "mcp" => {
                             mcp_command(&mut args, mcp25625, rtt);
                         },
+                        "stack" => {
+                            print_stack_usage(rtt);
+                        },
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
                         }
@@ -413,5 +416,22 @@ fn mcp_command(
             }
         },
         _ => { writeln!(fmt, "Unknown command").ok(); }
+    }
+}
+
+fn print_stack_usage(
+    fmt: &mut dyn core::fmt::Write
+) {
+    use crate::util::{stack_lower_bound, stack_upper_bound, STACK_PROBE_MAGICWORD};
+    let stack_size_words = (stack_upper_bound() - stack_lower_bound()) / 4;
+    let p = stack_lower_bound() as *mut u32;
+    let mut untouched_words = 0;
+    for i in 0..stack_size_words {
+        if unsafe { p.offset(i as isize).read() } == STACK_PROBE_MAGICWORD {
+            untouched_words += 1;
+        } else {
+            writeln!(fmt, "Min free: {}B", untouched_words * 4);
+            break;
+        }
     }
 }
