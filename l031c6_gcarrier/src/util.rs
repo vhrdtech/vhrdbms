@@ -65,3 +65,7 @@ pub fn current_stack_pointer() -> usize {
     }
     x
 }
+
+pub fn resistor_divider() {
+
+}

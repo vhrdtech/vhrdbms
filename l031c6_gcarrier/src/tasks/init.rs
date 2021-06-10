@@ -186,15 +186,6 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let bat_div_en_pin = gpioa.pa2.into_push_pull_output();
     let bat_div_pin = gpioa.pa7.into_analog();
     let mut adc = device.ADC.constrain(&mut rcc);
-    unsafe {
-        let device = hal::pac::Peripherals::steal();
-        let adc = device.ADC;
-        adc.cfgr2.modify(|_, w| w.ckmode().pclk());
-        adc.cr.modify(|_, w| w.adcal().set_bit());
-        while adc.cr.read().adcal().bit_is_set() {}
-        writeln!(rtt, "ADC cal done: {}", adc.calfact.read().bits()).ok();
-    }
-    // let mut adc = Adc::new(device.ADC, &mut rcc);
     adc.set_precision(Precision::B_12);
     adc.set_sample_time(SampleTime::T_160_5);
 
@@ -267,9 +258,9 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut afe_dsg_override = gpioh.ph0.into_push_pull_output();
     afe_dsg_override.set_low().ok();
     // Disable zero voltage charging, enabled by default (depletion FET)
-    // let mut zvchg_disable = gpiob.pb8.into_push_pull_output();
-    let mut precharge_enable = gpiob.pb8.into_push_pull_output();
-    precharge_enable.set_low().ok();
+    let mut zvchg_disable_pin = gpiob.pb8.into_push_pull_output();
+    // let mut precharge_enable = gpiob.pb8.into_push_pull_output();
+    // precharge_enable.set_high().ok();
     let afe_io = tasks::bms::AfeIo {
         afe_wake_pin,
         dcdc_en_pin: ps_5v0_bms_en,
@@ -278,7 +269,8 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         bat_div_en_pin,
         bat_div_pin,
         afe_chg_override,
-        afe_dsg_override
+        afe_dsg_override,
+        zvchg_disable_pin
     };
 
 

@@ -210,7 +210,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, afe_io, mcp25625],
+        resources = [i2c, bq76920, rtt, afe_io, mcp25625, adc],
         spawn = [bms_event]
     )]
     fn idle(cx: idle::Context) -> ! {

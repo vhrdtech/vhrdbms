@@ -4,6 +4,10 @@ use mcu_helper::tim_cyccnt::U32Ext;
 use core::fmt::Write;
 use crate::tasks::bms::BmsEvent;
 use crate::util::EventSource;
+use serde::{Serialize};
+use heapless::Vec;
+use uavcan::session_id::{NodeId, TransferPriority};
+use core::convert::TryInto;
 
 #[derive(Debug)]
 pub enum Event {
@@ -31,11 +35,21 @@ pub fn broadcast_power_control_frame(can_tx: &mut config::CanTX, on: bool) {
     rtic::pend(config::CAN_TX_HANDLER);
 }
 
-pub fn send_telemetry(can_tx: &mut config::CanTX) {
-    let data = [0u8; 128];
-    for (frame_data, frame_len) in uavcan_bridge::to_uavcan(&data) {
-        let frame = can_tx.pool.new_frame(FrameId::new_extended(0x010203).unwrap(), &frame_data[..frame_len]).unwrap();
-        let _ = can_tx.heap.push(frame);
+#[derive(Serialize)]
+pub struct Telemetry {
+    pub pack_voltage: bq769x0::MilliVolts,
+    pub pack_current: bq769x0::MilliAmperes,
+    pub cell_voltages: [bq769x0::MilliVolts; 5],
+}
+
+pub fn send_telemetry(can_tx: &mut config::CanTX, telemetry: &Telemetry) {
+    let mut buf = [0u8; 64];
+    let used = postcard::to_slice(telemetry, &mut buf);
+    if let Ok(payload) = used {
+        for (frame_data, frame_len) in uavcan_bridge::to_uavcan(payload) {
+            let frame = can_tx.pool.new_frame(FrameId::new_extended(uavcan::session_id::message::MessageSessionId::as_u32(50.try_into().unwrap(), 10.try_into().unwrap(), TransferPriority::Optional)).unwrap(), &frame_data[..frame_len]).unwrap();
+            let _ = can_tx.heap.push(frame);
+        }
     }
 }
 

@@ -25,6 +25,12 @@ btoi = { version = "0.4.2", default-features = false }
 no-std-compat = "0.4.1"
 uavcan = { path = "../../uavcan" }
 uavcan_bridge = { path = "../../uavcan_bridge" }
+postcard = "0.7.0"
+
+[dependencies.serde]
+version = "1.0.100"
+features = ["derive"]
+default-features = false
 
 [dependencies.stm32l0xx-hal]
 #git = "https://github.com/romixlab/stm32l0xx-hal.git"

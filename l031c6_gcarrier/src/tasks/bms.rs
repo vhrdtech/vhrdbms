@@ -1,5 +1,5 @@
 use crate::{config, tasks};
-use bq769x0::{MilliVolts};
+use bq769x0::{MilliVolts, MilliAmperes};
 use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
 //use crate::hal::prelude::_embedded_hal_adc_OneShot;
@@ -64,6 +64,19 @@ pub struct AfeIo {
     pub bat_div_pin: config::BatDivPin,
     pub afe_chg_override: config::AfeChgOverridePin,
     pub afe_dsg_override: config::AfeDsgOverridePin,
+    pub zvchg_disable_pin: config::ZvchgDisablePin,
+}
+
+impl AfeIo {
+    pub fn enable_voltage_dividers(&mut self) {
+        self.pack_div_en_pin.set_high().ok();
+        self.bat_div_en_pin.set_high().ok();
+    }
+
+    pub fn disable_voltage_dividers(&mut self) {
+        self.pack_div_en_pin.set_low().ok();
+        self.bat_div_en_pin.set_low().ok();
+    }
 }
 
 // enum BalancingStage {
@@ -126,7 +139,10 @@ pub fn afe_init(
         ov_delay: OVDelay::_4s,
         ov_threshold: config::CELL_OV_THRESHOLD
     };
-    bq769x0.init(i2c, &bq769x0_config).map_err(|e| Error::AfeError(e))
+    let r = bq769x0.init(i2c, &bq769x0_config).map_err(|e| Error::AfeError(e));
+    bq769x0.enable_adc(i2c, true).ok();
+    bq769x0.coulomb_counter_mode(i2c, bq769x0::CoulombCounterMode::Continuous).ok();
+    r
 }
 
 pub fn afe_discharge(
@@ -243,29 +259,29 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     }
                 }
             }
-            match bq769x0.is_charge_enabled(i2c) { // TODO: maybe remove this and check for OV directly
-                Ok(chg) => {
-                    if !chg {
-                        match bq769x0.sys_stat(i2c) {
-                            Ok(stat) => {
-                                if stat.overvoltage_is_set() {
-                                    let sufficiently_charged_cells = find_cells(i2c, bq769x0, |cell, _| {
-                                        cell > config::CELL_OV_CLEAR
-                                    }).unwrap_or(0);
-                                    if sufficiently_charged_cells == 0 { // when highly unbalanced, this check is better than total pack value.
-                                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::OVERVOLTAGE).ok();
-                                    }
-                                } else {
-                                    bq769x0.charge(i2c, true).ok();
-                                    bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
-                                }
-                            },
-                            Err(_) => {}
-                        }
-                    }
-                },
-                Err(_) => {}
-            }
+            // match bq769x0.is_charge_enabled(i2c) { // TODO: maybe remove this and check for OV directly
+            //     Ok(chg) => {
+            //         if !chg {
+            //             match bq769x0.sys_stat(i2c) {
+            //                 Ok(stat) => {
+            //                     if stat.overvoltage_is_set() {
+            //                         let sufficiently_charged_cells = find_cells(i2c, bq769x0, |cell, _| {
+            //                             cell > config::CELL_OV_CLEAR
+            //                         }).unwrap_or(0);
+            //                         if sufficiently_charged_cells == 0 { // when highly unbalanced, this check is better than total pack value.
+            //                             bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::OVERVOLTAGE).ok();
+            //                         }
+            //                     } else {
+            //                         bq769x0.charge(i2c, true).ok();
+            //                         bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
+            //                     }
+            //                 },
+            //                 Err(_) => {}
+            //             }
+            //         }
+            //     },
+            //     Err(_) => {}
+            // }
             match bq769x0.sys_stat(i2c) {
                 Ok(sys_stat) => {
                     if sys_stat.scd_is_set() | sys_stat.ocd_is_set() { // TODO: add max amount of restarts here?
@@ -297,7 +313,12 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 cx.spawn.softoff().ok();
             }
 
-            crate::tasks::api::send_telemetry(can_tx);
+            let telemetry = crate::tasks::api::Telemetry {
+                pack_voltage: bq769x0.voltage(i2c).unwrap_or(MilliVolts(0)),
+                pack_current: bq769x0.current(i2c).unwrap_or(MilliAmperes(0)),
+                cell_voltages: bq769x0.cell_voltages(i2c).unwrap_or([MilliVolts(0); 5])
+            };
+            crate::tasks::api::send_telemetry(can_tx, &telemetry);
 
             // if bms_state.charge_enabled {
             //     bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);

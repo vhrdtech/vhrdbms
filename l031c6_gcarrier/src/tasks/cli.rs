@@ -9,6 +9,7 @@ use crate::tasks::bms::BmsEvent;
 use btoi::{btoi, ParseIntegerError, btoi_radix};
 use no_std_compat::prelude::v1::*;
 use crate::hal::prelude::*;
+use stm32l0xx_hal::adc::{Adc, VRef, VTemp};
 
 macro_rules! ok_or_return {
     ($e: expr, $fmt: ident, $message: expr) => {
@@ -51,7 +52,8 @@ pub fn cli(
     bq769x0: &mut config::BQ769x0,
     spawn: crate::idle::Spawn,
     afe_io: &mut tasks::bms::AfeIo,
-    mcp25625: &mut config::Mcp25625Instance
+    mcp25625: &mut config::Mcp25625Instance,
+    adc: &mut Adc<crate::hal::adc::Ready>,
 ) {
     let mut rtt_down = [0u8; 128];
     let rtt_down_len = jlink_rtt::try_read(&mut rtt_down);
@@ -70,7 +72,7 @@ pub fn cli(
                             writeln!(rtt, "cmds: afe, pb, imx, reset, halt, tms").ok();
                         },
                         "afe" => {
-                            afe_command(&mut args, i2c, bq769x0, afe_io, rtt);
+                            afe_command(&mut args, i2c, bq769x0, afe_io, adc, rtt);
                         },
                         // "pb" => {
                         //     power_blocks_command(&mut args, power_blocks, rtt);
@@ -90,6 +92,9 @@ pub fn cli(
                         "stack" => {
                             print_stack_usage(rtt);
                         },
+                        "status" => {
+                            status_command(&mut args, i2c, bq769x0, afe_io, adc, rtt);
+                        }
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
                         }
@@ -127,6 +132,7 @@ fn afe_command(
     i2c: &mut config::InternalI2c,
     bq769x0: &mut config::BQ769x0,
     afe_io: &mut tasks::bms::AfeIo,
+    adc: &mut Adc<crate::hal::adc::Ready>,
     fmt: &mut dyn core::fmt::Write,
 ) {
     let afe_part = args.next();
@@ -182,6 +188,25 @@ fn afe_command(
                     }
                     return;
                 },
+                "zvchg" => {
+                    match one_of(part_cmd, &["off", "on"], fmt) {
+                        Some(offon) => {
+                            match offon {
+                                0 => {
+                                    writeln!(fmt, "ZVCHG OFF").ok();
+                                    afe_io.zvchg_disable_pin.set_high().ok();
+                                },
+                                1 => {
+                                    writeln!(fmt, "ZVCHG ON").ok();
+                                    afe_io.zvchg_disable_pin.set_low().ok();
+                                },
+                                _ => {},
+                            }
+                        },
+                        None => {}
+                    }
+                    return;
+                }
                 "stat" => {
                     match one_of(part_cmd, &["show", "reset"], fmt) {
                         Some(showreset) => {
@@ -214,6 +239,9 @@ fn afe_command(
                     return;
                 },
                 "vi" => {
+                    // Enable voltage dividers and give some time for input to stabilise
+                    afe_io.enable_voltage_dividers();
+                    // Read AFE ADC
                     let i = bq769x0.current(i2c);
                     let v = bq769x0.voltage(i2c);
                     let p: Result<i32, bq769x0::Error> = i.and_then(|i| {
@@ -229,6 +257,22 @@ fn afe_command(
                             let _ = writeln!(fmt, "Read err={:?}", e);
                         }
                     }
+                    // Read analog ADC inputs
+                    adc.calibrate_vdda();
+
+                    let mut vtemp_channel = VTemp::new();
+                    vtemp_channel.enable(adc);
+                    let vtemp = (adc.read(&mut vtemp_channel) as Result<u16, _>).map(|t| Adc::to_degrees_centigrade(t)).unwrap_or(0);
+                    // let vtemp = (adc.read(&mut vtemp_channel) as Result<u16, _>).unwrap_or(0);
+                    vtemp_channel.disable(adc);
+
+                    // let cal130 = stm32l0xx_hal::signature::VtempCal130::get().read();
+                    // let cal30 = stm32l0xx_hal::signature::VtempCal30::get().read();
+
+                    let bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+                    let pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+                    writeln!(fmt, "{} {} {}C", bat_voltage, pack_voltage, vtemp).ok();
+                    afe_io.disable_voltage_dividers();
                     return;
                 },
                 "bal" => {
@@ -434,4 +478,18 @@ fn print_stack_usage(
             break;
         }
     }
+}
+
+fn status_command(
+    args: &mut core::str::SplitAsciiWhitespace,
+    i2c: &mut config::InternalI2c,
+    bq769x0: &mut config::BQ769x0,
+    afe_io: &mut tasks::bms::AfeIo,
+    adc: &mut Adc<crate::hal::adc::Ready>,
+    fmt: &mut dyn core::fmt::Write,
+) {
+    use bq769x0::DegreesCentigrade;
+    let t_die = bq769x0.temperature(i2c, bq769x0::TemperatureSource::ExternalThermistor).unwrap_or(DegreesCentigrade(0));
+    let t_fet = bq769x0.temperature(i2c, bq769x0::TemperatureSource::ExternalThermistor).unwrap_or(DegreesCentigrade(0));
+    writeln!(fmt, "Tdie: {}, Tfet: {}", t_die, t_fet).ok();
 }

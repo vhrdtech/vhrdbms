@@ -66,6 +66,7 @@ pub type BatDivPin = PA7<Analog>;
 pub type DcDcEnPin = PA3<Output<PushPull>>;
 pub type AfeChgOverridePin = PH1<Output<PushPull>>;
 pub type AfeDsgOverridePin = PH0<Output<PushPull>>;
+pub type ZvchgDisablePin = PB8<Output<PushPull>>;
 
 // Balancing
 pub const BALANCE_START_DELTA_MV: u32 = 300;
@@ -75,7 +76,7 @@ pub const BALANCE_START_DELTA_MV: u32 = 300;
 use stm32l0xx_hal::pac::Interrupt;
 use vhrdcan::FrameId;
 use bq769x0::MilliVolts;
-use stm32l0xx_hal::gpio::gpiob::{PB9, PB4, PB6, PB7, PB3};
+use stm32l0xx_hal::gpio::gpiob::{PB9, PB4, PB6, PB7, PB3, PB8};
 use stm32l0xx_hal::gpio::gpioh::{PH0, PH1};
 use crate::tasks::bms::CellCount;
 
