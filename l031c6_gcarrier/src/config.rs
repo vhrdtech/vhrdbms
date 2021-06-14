@@ -15,8 +15,10 @@ pub const BALANCING_CHECK_INTERVAL_MS: u32 = 5000;
 pub type Mcp25625Sck = PB3<Analog>;
 pub type Mcp25625Miso = PA11<Analog>;
 pub type Mcp25625Mosi = PA12<Analog>;
+pub type Mcp25625IrqUninit = PA10<Analog>;
 pub type Mcp25625Cs = PA9<Output<PushPull>>;
-pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<hal::pac::SPI1, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
+pub type Mcp25625Spi = hal::pac::SPI1;
+pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<Mcp25625Spi, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
 pub type Mcp25625Irq = PA10<Input<PullUp>>;
 pub type CanTX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U16>;
 pub type CanRX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U8>;
@@ -67,6 +69,9 @@ pub type DcDcEnPin = PA3<Output<PushPull>>;
 pub type AfeChgOverridePin = PH1<Output<PushPull>>;
 pub type AfeDsgOverridePin = PH0<Output<PushPull>>;
 pub type ZvchgDisablePin = PB8<Output<PushPull>>;
+pub type Switch5V0S0Pin = PA5<Output<PushPull>>;
+pub type Switch3V3S0Pin = PA4<Output<PushPull>>;
+pub type Switch5V0AuxPin = PB0<Output<PushPull>>;
 
 // Balancing
 pub const BALANCE_START_DELTA_MV: u32 = 300;
@@ -76,7 +81,7 @@ pub const BALANCE_START_DELTA_MV: u32 = 300;
 use stm32l0xx_hal::pac::Interrupt;
 use vhrdcan::FrameId;
 use bq769x0::MilliVolts;
-use stm32l0xx_hal::gpio::gpiob::{PB9, PB4, PB6, PB7, PB3, PB8};
+use stm32l0xx_hal::gpio::gpiob::{PB9, PB4, PB6, PB7, PB3, PB8, PB0};
 use stm32l0xx_hal::gpio::gpioh::{PH0, PH1};
 use crate::tasks::bms::CellCount;
 

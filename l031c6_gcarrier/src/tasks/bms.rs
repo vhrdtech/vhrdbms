@@ -4,9 +4,8 @@ use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
 //use crate::hal::prelude::_embedded_hal_adc_OneShot;
 // use jlink_rtt::NonBlockingOutput;
-use stm32l0xx_hal::prelude::OutputPin;
+use stm32l0xx_hal::prelude::{OutputPin, InputPin};
 //use mcu_helper::color;
-use stm32l0xx_hal::time::MicroSeconds;
 use mcu_helper::color;
 use bq769x0::{SCDDelay, Amperes, OCDDelay, MicroOhms, UVDelay, OVDelay};
 use bq769x0::Config as BQ769x0Config;
@@ -65,6 +64,9 @@ pub struct AfeIo {
     pub afe_chg_override: config::AfeChgOverridePin,
     pub afe_dsg_override: config::AfeDsgOverridePin,
     pub zvchg_disable_pin: config::ZvchgDisablePin,
+    pub switch_5v0_s0_en: config::Switch5V0S0Pin,
+    pub switch_3v3_s0_en: config::Switch3V3S0Pin,
+    pub switch_5v0_aux_en: config::Switch5V0AuxPin,
 }
 
 impl AfeIo {
@@ -76,6 +78,20 @@ impl AfeIo {
     pub fn disable_voltage_dividers(&mut self) {
         self.pack_div_en_pin.set_low().ok();
         self.bat_div_en_pin.set_low().ok();
+    }
+
+    pub fn enable_s0_switches(&mut self) {
+        self.switch_3v3_s0_en.set_high().ok();
+        self.switch_5v0_s0_en.set_high().ok();
+    }
+
+    pub fn is_s0_switches_enabled(&self) -> bool {
+        self.switch_3v3_s0_en.is_high().unwrap()
+    }
+
+    pub fn disable_s0_switches(&mut self) {
+        self.switch_3v3_s0_en.set_low().ok();
+        self.switch_5v0_s0_en.set_low().ok();
     }
 }
 
@@ -203,6 +219,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             if source.need_to_forward() {
                 crate::tasks::api::broadcast_power_control_frame(can_tx, false);
             }
+            afe_io.disable_s0_switches();
         },
         BmsEvent::PowerOn(source) => {
             if bms_state.power_enabled {
@@ -221,6 +238,8 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 if source.need_to_forward() {
                     crate::tasks::api::broadcast_power_control_frame(can_tx, true);
                 }
+                afe_io.enable_s0_switches();
+
             } else {
                 bms_state.power_on_fault_count += 1;
                 if bms_state.power_on_fault_count > 5 {

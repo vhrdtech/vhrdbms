@@ -18,26 +18,22 @@ use hal::{
     rtc::{Instant, RTC, ClockSource as RtcClockSource},
 };
 
-use power_helper::power_block::{PowerBlock, PowerBlockType, DummyInputPin};
-// use crate::power_block::PowerBlockId;
-
-use mcp25625::{MCP25625, MCP25625Config, FiltersConfig, McpOperationMode, FiltersConfigBuffer0, FiltersConfigBuffer1, FiltersMask};
+use mcp25625::MCP25625;
 
 use cfg_if::cfg_if;
 use stm32l0xx_hal::adc::{Precision, SampleTime};
-use vhrdcan::FrameId;
 use bq769x0::BQ769x0;
 
 use crate::tasks;
 use crate::config;
 use crate::tasks::led::ChargeIndicator;
-use crate::util::{current_stack_pointer, stack_upper_bound, stack_lower_bound};
+use crate::util::{current_stack_pointer, stack_lower_bound};
 use stm32l0xx_hal::pwm;
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let free_stack_bytes = current_stack_pointer() - stack_lower_bound();
     unsafe {
-        let mut p = stack_lower_bound() as *mut u32;
+        let p = stack_lower_bound() as *mut u32;
         let free_stack_words = free_stack_bytes / 4;
         for i in 0..free_stack_words {
             p.offset(i as isize).write(crate::util::STACK_PROBE_MAGICWORD);
@@ -137,38 +133,13 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // +5V0_BMS & +3V3_BMS (Self power, ORed with BQ76920 +3V3_AFE)
     let mut ps_5v0_bms_en = gpioa.pa3.into_push_pull_output();
     ps_5v0_bms_en.set_high().ok();
-    // let pb_5v0_bms: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-    //     DcDc, ps_5v0_bms_en, None
-    // );
-    // let _ = power_blocks.insert(DcDc5V0Bms, Box::new(pb_5v0_bms));
-    // +5V0_SYSCAN switch
-    let mut ps_5v0_syscan_en = gpioa.pa5.into_push_pull_output();
-    // let pb_5v0_syscan: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-    //     Switch, ps_5v0_syscan_en, None
-    // );
-    // let _ = power_blocks.insert(Switch5V0Syscan, Box::new(pb_5v0_syscan));
-    // +3V3_BMS_S0 switch
-    let mut ps_3v3_s0_en = gpioa.pa4.into_push_pull_output();
-    // let pb_3v3_s0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-    //     Switch, ps_3v3_s0_en, None
-    // );
-    // let _ = power_blocks.insert(Switch3V3S0, Box::new(pb_3v3_s0));
-    // +5V0_UWB switch
-    let mut ps_5v0_uwb_en = gpiob.pb0.into_push_pull_output();
-    ps_5v0_uwb_en.set_high().ok();
-    cortex_m::asm::delay(4_000_000);
-    ps_5v0_uwb_en.set_low().ok();
-    // let pb_5v0: PowerBlock<_, DummyInputPin> = PowerBlock::new(
-    //     Switch, ps_5v0_uwb_en, None
-    // );
-    // let _ = power_blocks.insert(Switch5V0Uwb, Box::new(pb_5v0));
-
-    // power_blocks.get_mut(&Switch5V0Syscan).unwrap().enable();
-    ps_5v0_syscan_en.set_high().ok();
-    // power_blocks.get_mut(&Switch3V3S0).unwrap().enable();
-    ps_3v3_s0_en.set_high().ok();
+    // +5V0_S0 switch (CAN transceiver, )
+    let switch_5v0_s0_en = gpioa.pa5.into_push_pull_output();
+    // +3V3_S0 switch (MCP25625, )
+    let switch_3v3_s0_en = gpioa.pa4.into_push_pull_output();
+    // +5V0_AUX switch (Buzzer, )
+    let switch_5v0_aux_en = gpiob.pb0.into_push_pull_output();
     cortex_m::asm::delay(ms2cycles_raw!(clocks, 10));
-
 
     // Enable IRQ on power button input
     let button_line = GpioLine::from_raw_line(button.pin_number()).unwrap();
@@ -189,60 +160,29 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     adc.set_precision(Precision::B_12);
     adc.set_sample_time(SampleTime::T_160_5);
 
-
     // SPI<->CANBus MCP25625T-E/ML
-    let mcp_freq = 1.mhz();
     // GPIO init
-    let mcp25625_irq         = gpioa.pa10.into_pull_up_input();
+    let mcp25625_irq         = gpioa.pa10;//.into_pull_up_input();
     let mcp_int_line = GpioLine::from_raw_line(mcp25625_irq.pin_number()).unwrap();
     exti.listen_gpio(&mut syscfg, mcp25625_irq.port(), mcp_int_line, TriggerEdge::Falling);
     // let mcp_stby         = gpioa.pa0; // NORMAL mode is low, SLEEP is high
     let mcp_cs         = gpioa.pa9;
-    let mcp_sck         = gpiob.pb3;
-    let mcp_miso         = gpioa.pa11;
-    let mcp_mosi         = gpioa.pa12;
+    // let mcp_sck         = gpiob.pb3;
+    // let mcp_miso         = gpioa.pa11;
+    // let mcp_mosi         = gpioa.pa12;
     // let mut mcp_stby = mcp_stby.into_push_pull_output();
     // mcp_stby.set_low().ok();
     let mut mcp_cs = mcp_cs.into_push_pull_output();
-    mcp_cs.set_high().ok();
-    // SPI init
-    let spi = device.SPI1.spi(
-        (mcp_sck, mcp_miso, mcp_mosi),
-        hal::spi::MODE_0,
-        mcp_freq,
-        &mut rcc
-    );
-    // MCP25625 init
-    let one_cp: u32 = 1000; // tweak to be approx. one spi clock cycle
-    cortex_m::asm::delay(100_000);
-    let mut mcp25625 = MCP25625::new(spi, mcp_cs, one_cp);
-    let filters_buffer0 = FiltersConfigBuffer0 {
-        mask: FiltersMask::AllExtendedIdBits,
-        filter0: config::SOFTOFF_NOTIFY_FRAME_ID,
-        filter1: Some(FrameId::new_extended(0x19992350).unwrap())
+    mcp_cs.set_low().ok();
+    let mcp25625_parts = crate::tasks::canbus::Mcp25625Parts {
+        cs: mcp_cs,
+        sck: gpiob.pb3,
+        miso: gpioa.pa11,
+        mosi: gpioa.pa12,
+        spi: device.SPI1,
+        irq: mcp25625_irq
     };
-    let filters_buffer1 = FiltersConfigBuffer1 {
-        mask: FiltersMask::OnlyStandardIdBits,
-        filter2: config::POWER_CONTROL_FRAME_ID,
-        filter3: None,
-        filter4: None,
-        filter5: None,
-    };
-    let filters_config = FiltersConfig::Filter(filters_buffer0, Some(filters_buffer1));
-    let mcp_config = MCP25625Config {
-        brp: 0, // Fosc=16MHz
-        prop_seg: 3,
-        ph_seg1: 2,
-        ph_seg2: 2,
-        sync_jump_width: 2,
-        rollover_to_buffer1: true,
-        filters_config,
-        // filters_config: FiltersConfig::ReceiveAll,
-        operation_mode: McpOperationMode::Normal
-    };
-    let r = mcp25625.apply_config(mcp_config);
-    writeln!(rtt, "mcp25625 config: {:?}", r).ok();
-    mcp25625.enable_interrupts(0b0001_1111);
+    let mcp25625_state = crate::tasks::canbus::Mcp25625State::PoweredDown(Some(mcp25625_parts));
     // Queues
     let can_tx = config::CanTX::new();
     let can_rx = config::CanRX::new();
@@ -258,7 +198,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut afe_dsg_override = gpioh.ph0.into_push_pull_output();
     afe_dsg_override.set_low().ok();
     // Disable zero voltage charging, enabled by default (depletion FET)
-    let mut zvchg_disable_pin = gpiob.pb8.into_push_pull_output();
+    let zvchg_disable_pin = gpiob.pb8.into_push_pull_output();
     // let mut precharge_enable = gpiob.pb8.into_push_pull_output();
     // precharge_enable.set_high().ok();
     let afe_io = tasks::bms::AfeIo {
@@ -270,7 +210,10 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         bat_div_pin,
         afe_chg_override,
         afe_dsg_override,
-        zvchg_disable_pin
+        zvchg_disable_pin,
+        switch_5v0_s0_en,
+        switch_3v3_s0_en,
+        switch_5v0_aux_en,
     };
 
 
@@ -314,14 +257,14 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
 
      crate::init::LateResources {
         clocks,
+        rcc,
         watchdog,
         bms_state,
         afe_io,
         adc,
         status_led,
         rtt,
-        mcp25625,
-        mcp25625_irq,
+        mcp25625_state,
         can_tx,
         can_rx,
         i2c,

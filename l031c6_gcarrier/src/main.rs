@@ -30,14 +30,15 @@ use mcu_helper::tim_cyccnt::{U32Ext};
 const APP: () = {
     struct Resources {
         clocks: hal::rcc::Clocks,
+        rcc: hal::rcc::Rcc,
         watchdog: IndependedWatchdog,
         bms_state: tasks::bms::BmsState,
         afe_io: tasks::bms::AfeIo,
         adc: Adc<hal::adc::Ready>,
         status_led: PB2<Output<PushPull>>,
         rtt: NonBlockingOutput,
-        mcp25625: config::Mcp25625Instance,
-        mcp25625_irq: config::Mcp25625Irq,
+        mcp25625_state: tasks::canbus::Mcp25625State,
+        // mcp25625_irq: config::Mcp25625Irq,
         can_tx: config::CanTX,
         can_rx: config::CanRX,
         i2c: config::InternalI2c,
@@ -177,8 +178,7 @@ const APP: () = {
             &clocks,
             button,
             button_state,
-            mcp25625,
-            mcp25625_irq,
+            mcp25625_state,
             can_tx,
             can_rx,
             rtt
@@ -210,7 +210,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, afe_io, mcp25625, adc],
+        resources = [i2c, bq76920, rtt, afe_io, adc, rcc, exti, mcp25625_state],
         spawn = [bms_event]
     )]
     fn idle(cx: idle::Context) -> ! {
@@ -252,8 +252,8 @@ use mcu_helper::color;
 fn panic(_info: &PanicInfo) -> ! {
     use core::fmt::Write;
     let mut rtt = jlink_rtt::NonBlockingOutput::new(false);
-    writeln!(rtt, "\n{}PANIC{}\n", color::RED, color::DEFAULT).ok();
-    // writeln!(rtt, "{:?}", _info).ok();
+    // writeln!(rtt, "\n{}PANIC{}\n", color::RED, color::DEFAULT).ok();
+    writeln!(rtt, "{}{:?}{}", color::RED, _info, color::DEFAULT).ok();
 
     cortex_m::asm::delay(6_000_000);
     cortex_m::peripheral::SCB::sys_reset(); // -> !

@@ -5,8 +5,7 @@ use core::fmt::Write;
 use crate::tasks::bms::BmsEvent;
 use crate::util::EventSource;
 use serde::{Serialize};
-use heapless::Vec;
-use uavcan::session_id::{NodeId, TransferPriority};
+use uavcan::session_id::{TransferPriority};
 use core::convert::TryInto;
 
 #[derive(Debug)]

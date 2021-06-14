@@ -2,14 +2,14 @@ use core::fmt::Write;
 use crate::{config, tasks};
 use mcu_helper::color;
 // use crate::power_block::PowerBlockId;
-use core::convert::TryFrom;
 use crate::tasks::bms::BmsEvent;
 // use power_helper::power_block::PowerBlockControl;
 // use stm32l0xx_hal::prelude::OutputPin;
 use btoi::{btoi, ParseIntegerError, btoi_radix};
 use no_std_compat::prelude::v1::*;
 use crate::hal::prelude::*;
-use stm32l0xx_hal::adc::{Adc, VRef, VTemp};
+use stm32l0xx_hal::adc::{Adc, VTemp};
+use crate::tasks::canbus::Mcp25625State;
 
 macro_rules! ok_or_return {
     ($e: expr, $fmt: ident, $message: expr) => {
@@ -52,7 +52,8 @@ pub fn cli(
     bq769x0: &mut config::BQ769x0,
     spawn: crate::idle::Spawn,
     afe_io: &mut tasks::bms::AfeIo,
-    mcp25625: &mut config::Mcp25625Instance,
+    rcc: &mut crate::hal::rcc::Rcc,
+    mcp25625: &mut crate::tasks::canbus::Mcp25625State,
     adc: &mut Adc<crate::hal::adc::Ready>,
 ) {
     let mut rtt_down = [0u8; 128];
@@ -87,7 +88,7 @@ pub fn cli(
                             i2c_command(&mut args, i2c, rtt);
                         },
                         "mcp" => {
-                            mcp_command(&mut args, mcp25625, rtt);
+                            mcp_command(&mut args, afe_io, rcc, mcp25625, rtt);
                         },
                         "stack" => {
                             print_stack_usage(rtt);
@@ -422,44 +423,68 @@ fn i2c_command(
 
 fn mcp_command(
     args: &mut core::str::SplitAsciiWhitespace,
-    mcp25625: &mut config::Mcp25625Instance,
+    afe_io: &mut tasks::bms::AfeIo,
+    rcc: &mut crate::hal::rcc::Rcc,
+    mcp25625: &mut crate::tasks::canbus::Mcp25625State,
     fmt: &mut dyn core::fmt::Write
 ) {
     let subcmd = some_or_return!(args.next(), fmt, "mcp dump");
     match subcmd {
-        "dump" => {
-            writeln!(fmt, "\n\nRXF0-RXF2:").ok();
-            for addr in 0b0000_0000..=0b0000_1011 {
-                let reg = mcp25625.read_reg(addr);
-                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+        "up" => {
+            if afe_io.is_s0_switches_enabled() {
+                writeln!(fmt, "Already up").ok();
+                return;
             }
-            writeln!(fmt, "\n\nRXF3-RXF5:").ok();
-            for addr in 0b0001_0000..=0b0001_1011 {
-                let reg = mcp25625.read_reg(addr);
-                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+            afe_io.enable_s0_switches();
+            match crate::tasks::canbus::mcp25625_bringup(mcp25625, rcc, fmt) {
+                Ok(()) => {
+                    writeln!(fmt, "Ok").ok();
+                },
+                Err(e) => {
+                    writeln!(fmt, "Err: {:?}", e).ok();
+                    afe_io.disable_s0_switches();
+                }
             }
-            writeln!(fmt, "\n\nRXM0-RXM1:").ok();
-            for addr in 0b0010_0000..=0b0010_0111 {
-                let reg = mcp25625.read_reg(addr);
-                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
-            }
-            writeln!(fmt, "\n\nTXB0:").ok();
-            for addr in 0b0011_0000..=0b0011_1101 {
-                let reg = mcp25625.read_reg(addr);
-                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
-            }
-            writeln!(fmt, "\n\nTXB1:").ok();
-            for addr in 0b0100_0000..=0b100_1101 {
-                let reg = mcp25625.read_reg(addr);
-                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
-            }
-            writeln!(fmt, "\n\nTXB2:").ok();
-            for addr in 0b0101_0000..=0b0101_1101 {
-                let reg = mcp25625.read_reg(addr);
-                writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
-            }
-        },
-        _ => { writeln!(fmt, "Unknown command").ok(); }
+        }
+        "down" => {
+            afe_io.disable_s0_switches();
+            crate::tasks::canbus::mcp25625_bringdown(mcp25625, rcc);
+        }
+        //         "dump" => {
+//             writeln!(fmt, "\n\nRXF0-RXF2:").ok();
+//             for addr in 0b0000_0000..=0b0000_1011 {
+//                 let reg = mcp25625.read_reg(addr);
+//                 writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+//             }
+//             writeln!(fmt, "\n\nRXF3-RXF5:").ok();
+//             for addr in 0b0001_0000..=0b0001_1011 {
+//                 let reg = mcp25625.read_reg(addr);
+//                 writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+//             }
+//             writeln!(fmt, "\n\nRXM0-RXM1:").ok();
+//             for addr in 0b0010_0000..=0b0010_0111 {
+//                 let reg = mcp25625.read_reg(addr);
+//                 writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+//             }
+//             writeln!(fmt, "\n\nTXB0:").ok();
+//             for addr in 0b0011_0000..=0b0011_1101 {
+//                 let reg = mcp25625.read_reg(addr);
+//                 writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+//             }
+//             writeln!(fmt, "\n\nTXB1:").ok();
+//             for addr in 0b0100_0000..=0b100_1101 {
+//                 let reg = mcp25625.read_reg(addr);
+//                 writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+//             }
+//             writeln!(fmt, "\n\nTXB2:").ok();
+//             for addr in 0b0101_0000..=0b0101_1101 {
+//                 let reg = mcp25625.read_reg(addr);
+//                 writeln!(fmt, "{:08b} = {:08b}", addr, reg).ok();
+//             }
+//         }
+        _ => {
+            writeln!(fmt, "Unknown command").ok();
+        }
     }
 }
 
@@ -481,15 +506,12 @@ fn print_stack_usage(
 }
 
 fn status_command(
-    args: &mut core::str::SplitAsciiWhitespace,
-    i2c: &mut config::InternalI2c,
-    bq769x0: &mut config::BQ769x0,
-    afe_io: &mut tasks::bms::AfeIo,
-    adc: &mut Adc<crate::hal::adc::Ready>,
-    fmt: &mut dyn core::fmt::Write,
+    _args: &mut core::str::SplitAsciiWhitespace,
+    _i2c: &mut config::InternalI2c,
+    _bq769x0: &mut config::BQ769x0,
+    _afe_io: &mut tasks::bms::AfeIo,
+    _adc: &mut Adc<crate::hal::adc::Ready>,
+    _fmt: &mut dyn core::fmt::Write,
 ) {
-    use bq769x0::DegreesCentigrade;
-    let t_die = bq769x0.temperature(i2c, bq769x0::TemperatureSource::ExternalThermistor).unwrap_or(DegreesCentigrade(0));
-    let t_fet = bq769x0.temperature(i2c, bq769x0::TemperatureSource::ExternalThermistor).unwrap_or(DegreesCentigrade(0));
-    writeln!(fmt, "Tdie: {}, Tfet: {}", t_die, t_fet).ok();
+
 }
