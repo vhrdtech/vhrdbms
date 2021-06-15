@@ -51,7 +51,7 @@ impl From<McpErrorKind> for Error {
     }
 }
 
-pub fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc, fmt: &mut dyn core::fmt::Write) -> Result<(), Error> {
+pub fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc) -> Result<(), Error> {
     let mut mcp_parts = match mcp25625_state {
         Mcp25625State::Operational(_) => {
             return Err(Error::CodeFault);
@@ -77,7 +77,7 @@ pub fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal
     let irq = mcp_parts.irq.into_pull_up_input();
     cortex_m::asm::delay(100_000);
     let mut mcp25625 = MCP25625::new(spi, mcp_parts.cs, one_cp);
-    match mcp25625_configure(&mut mcp25625, fmt) {
+    match mcp25625_configure(&mut mcp25625) {
         Ok(()) => {
 
         },
@@ -127,7 +127,7 @@ pub fn mcp25625_bringdown(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::h
     Ok(())
 }
 
-fn mcp25625_configure(mcp25625: &mut config::Mcp25625Instance, fmt: &mut dyn core::fmt::Write) -> Result<(), McpErrorKind> {
+fn mcp25625_configure(mcp25625: &mut config::Mcp25625Instance) -> Result<(), McpErrorKind> {
     let filters_buffer0 = FiltersConfigBuffer0 {
         mask: FiltersMask::AllExtendedIdBits,
         filter0: config::SOFTOFF_NOTIFY_FRAME_ID,

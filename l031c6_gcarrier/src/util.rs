@@ -1,3 +1,4 @@
+use core::fmt::Formatter;
 #[allow(unused_macros)]
 macro_rules! ms2cycles {
     ($clocks:expr, $amount:expr) => {
@@ -69,6 +70,15 @@ pub fn current_stack_pointer() -> usize {
     x
 }
 
-pub fn resistor_divider() {
+pub struct Ohms(pub u32);
 
+pub struct MilliVolts(pub i32);
+impl core::fmt::Display for MilliVolts {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}mV", self.0)
+    }
+}
+
+pub fn resistor_divider_inverse(rt: Ohms, rb: Ohms, vin: MilliVolts) -> MilliVolts {
+    MilliVolts(vin.0 * (rt.0 as i32 + rb.0 as i32) / rb.0 as i32)
 }

@@ -436,7 +436,7 @@ fn mcp_command(
                 return;
             }
             afe_io.enable_s0_switches();
-            match crate::tasks::canbus::mcp25625_bringup(mcp25625, rcc, fmt) {
+            match crate::tasks::canbus::mcp25625_bringup(mcp25625, rcc) {
                 Ok(()) => {
                     writeln!(fmt, "Ok").ok();
                 },

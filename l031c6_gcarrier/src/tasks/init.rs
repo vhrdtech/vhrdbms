@@ -229,7 +229,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
             }
         }
     // Prepare bq76920 config
-    let mut bq76920 = BQ769x0::new(0x08);
+    let mut bq76920 = BQ769x0::new(0x08, config::CELL_COUNT as u8).unwrap();
     match crate::tasks::bms::afe_init(&mut i2c, &mut bq76920) {
         Ok(_actual) => {
             let _ = writeln!(rtt, "afe init ok");

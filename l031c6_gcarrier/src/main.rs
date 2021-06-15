@@ -62,6 +62,7 @@ const APP: () = {
     #[task(
         resources = [
             &clocks,
+            rcc,
             bms_state,
             i2c,
             bq76920,
@@ -69,6 +70,7 @@ const APP: () = {
             adc,
             afe_io,
             can_tx,
+            mcp25625_state,
         ],
         capacity = 8,
         schedule = [
@@ -176,6 +178,7 @@ const APP: () = {
         binds = EXTI4_15,
         resources = [
             &clocks,
+            rcc,
             button,
             button_state,
             mcp25625_state,

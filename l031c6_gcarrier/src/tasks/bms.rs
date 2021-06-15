@@ -4,7 +4,7 @@ use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
 //use crate::hal::prelude::_embedded_hal_adc_OneShot;
 // use jlink_rtt::NonBlockingOutput;
-use stm32l0xx_hal::prelude::{OutputPin, InputPin};
+use stm32l0xx_hal::prelude::*;
 //use mcu_helper::color;
 use mcu_helper::color;
 use bq769x0::{SCDDelay, Amperes, OCDDelay, MicroOhms, UVDelay, OVDelay};
@@ -126,9 +126,9 @@ impl AfeIo {
 // }
 
 pub enum CellCount {
-    _3S,
-    _4S,
-    _5S,
+    _3S = 3,
+    _4S = 4,
+    _5S = 5,
 }
 impl CellCount {
     pub fn cells_mask(&self) -> u16 {
@@ -191,9 +191,11 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let bq769x0: &mut config::BQ769x0 = cx.resources.bq76920;
     let rtt = cx.resources.rtt;
     let clocks = cx.resources.clocks;
-    let _adc = cx.resources.adc;
+    let rcc = cx.resources.rcc;
+    let adc = cx.resources.adc;
     let afe_io: &mut AfeIo = cx.resources.afe_io;
     let can_tx = cx.resources.can_tx;
+    let mcp25625_state = cx.resources.mcp25625_state;
 
     match e {
         BmsEvent::TogglePower(source) => {
@@ -220,18 +222,20 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 crate::tasks::api::broadcast_power_control_frame(can_tx, false);
             }
             afe_io.disable_s0_switches();
+            crate::tasks::canbus::mcp25625_bringdown(mcp25625_state, rcc);
         },
         BmsEvent::PowerOn(source) => {
             if bms_state.power_enabled {
                 writeln!(rtt, "Already on").ok();
                 return;
             }
-            // crate::board_components::imx_prepare_boot(i2c,  rtt);
+            // crate::board_components::imx_prepare_boot(i2c, rtt);
             let r = afe_discharge(i2c, bq769x0, true);
             let dsg_successful = r.is_ok();
             writeln!(rtt, "DSG successful?: {:?}", r).ok();
             if dsg_successful {
                 // crate::power_block::enable_all(power_blocks);
+
                 bms_state.power_enabled = true;
                 bms_state.power_on_fault_count = 0;
                 cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
@@ -239,6 +243,15 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     crate::tasks::api::broadcast_power_control_frame(can_tx, true);
                 }
                 afe_io.enable_s0_switches();
+                match crate::tasks::canbus::mcp25625_bringup(mcp25625_state, rcc) {
+                    Ok(()) => {
+                        writeln!(rtt, "McpOk").ok();
+                    },
+                    Err(e) => {
+                        writeln!(rtt, "McpErr: {:?}", e).ok();
+                        afe_io.disable_s0_switches();
+                    }
+                }
 
             } else {
                 bms_state.power_on_fault_count += 1;
@@ -248,9 +261,8 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             }
         }
         BmsEvent::CheckAfe => {
-            let sys_stat = bq769x0.sys_stat(i2c);
-            match sys_stat {
-                Ok(_) => {},
+            let sys_stat = match bq769x0.sys_stat(i2c) {
+                Ok(s) => { s },
                 Err(e) => {
                     use bq769x0::Error;
                     match e {
@@ -276,8 +288,9 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                         },
                         _ => {}
                     }
+                    return;
                 }
-            }
+            };
             // match bq769x0.is_charge_enabled(i2c) { // TODO: maybe remove this and check for OV directly
             //     Ok(chg) => {
             //         if !chg {
@@ -301,43 +314,52 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             //     },
             //     Err(_) => {}
             // }
-            match bq769x0.sys_stat(i2c) {
-                Ok(sys_stat) => {
-                    if sys_stat.scd_is_set() | sys_stat.ocd_is_set() { // TODO: add max amount of restarts here?
-                        writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
-                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT).ok();
-                        if bms_state.power_enabled {
-                            cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoForward)).ok();
-                        }
-                    }
-                    if sys_stat.undervoltage_is_set() {
-                        writeln!(rtt, "{}UV detected, shutting off{}", color::YELLOW, color::DEFAULT).ok();
-                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
-                        // cx.spawn.bms_event(BmsEvent::PowerOff).ok();
-                        cx.spawn.bms_event(BmsEvent::Halt).ok();
-                    }
-                    if sys_stat.device_xready_is_set() {
-                        writeln!(rtt, "{}Xready detected, clearing{}", color::RED, color::DEFAULT).ok();
-                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
-                        bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
-                    }
-                },
-                Err(_) => {}
+            if sys_stat.scd_is_set() | sys_stat.ocd_is_set() { // TODO: add max amount of restarts here?
+                writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
+                bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT).ok();
+                if bms_state.power_enabled {
+                    cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoForward)).ok();
+                }
             }
-            let soft_undervoltage_cells = find_cells(i2c, bq769x0, |cell, _| {
+            if sys_stat.undervoltage_is_set() {
+                writeln!(rtt, "{}UV detected, shutting off{}", color::YELLOW, color::DEFAULT).ok();
+                bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::UNDERVOLTAGE).ok();
+                // cx.spawn.bms_event(BmsEvent::PowerOff).ok();
+                cx.spawn.bms_event(BmsEvent::Halt).ok();
+            }
+            if sys_stat.device_xready_is_set() {
+                writeln!(rtt, "{}Xready detected, clearing{}", color::RED, color::DEFAULT).ok();
+                bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
+                bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
+            }
+            let cells = bq769x0.cell_voltages(i2c).unwrap_or(&[bq769x0::MilliVolts(0); 0]);
+            let soft_undervoltage_cells = find_cells(&cells, |cell, _| {
                 cell < config::CELL_SOFT_UV_THRESHOLD
-            }).unwrap_or(0) & config::CELL_COUNT.cells_mask();
+            }) & config::CELL_COUNT.cells_mask();
             if soft_undervoltage_cells != 0 {
                 writeln!(rtt, "{}Soft undervoltage: {:015b} {}", color::YELLOW, soft_undervoltage_cells, color::DEFAULT).ok();
                 cx.spawn.softoff().ok();
             }
 
             let telemetry = crate::tasks::api::Telemetry {
-                pack_voltage: bq769x0.voltage(i2c).unwrap_or(MilliVolts(0)),
+                pack_voltage: bq769x0.voltage(i2c).unwrap_or(bq769x0::MilliVolts(0)),
                 pack_current: bq769x0.current(i2c).unwrap_or(MilliAmperes(0)),
-                cell_voltages: bq769x0.cell_voltages(i2c).unwrap_or([MilliVolts(0); 5])
+                // cell_voltages: bq769x0.cell_voltages(i2c).unwrap_or(&[bq769x0::MilliVolts(0); 0])
+                cell_voltages: [bq769x0::MilliVolts(0); 5]
             };
             crate::tasks::api::send_telemetry(can_tx, &telemetry);
+
+            // Enable voltage dividers and give some time for input to stabilise
+            afe_io.enable_voltage_dividers();
+            delay_ms!(clocks, 1);
+            use crate::util::{MilliVolts, resistor_divider_inverse};
+            let bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            let bat_voltage = resistor_divider_inverse(config::BAT_DIV_RT, config::BAT_DIV_RB, MilliVolts(bat_voltage as i32));
+
+            let pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            let pack_voltage = resistor_divider_inverse(config::PACK_DIV_RT, config::PACK_DIV_RB, MilliVolts(pack_voltage as i32));
+            writeln!(rtt, "{} {}", bat_voltage, pack_voltage).ok();
+            afe_io.disable_voltage_dividers();
 
             // if bms_state.charge_enabled {
             //     bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);
@@ -414,18 +436,19 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
 }
 
 fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
-    i2c: &mut config::InternalI2c,
-    bq769x0: &mut config::BQ769x0,
+    // i2c: &mut config::InternalI2c,
+    // bq769x0: &mut config::BQ769x0,
+    cells: &[MilliVolts],
     f: F
-) -> Result<u16, Error> {
-    let cells = bq769x0.cell_voltages(i2c)?;
+) -> u16 {
+    // let cells = bq769x0.cell_voltages(i2c)?;
     let low_cell = *cells.iter().min().unwrap();
     let cells = cells
         .iter()
         .map(|cell| f(*cell, low_cell))
         .enumerate().map(|(i, c)| (c as u16) << i)
         .fold(0u16, |acc, cell_mask| acc | cell_mask);
-    Ok(cells)
+    cells
 }
 
 // fn check_balancing(

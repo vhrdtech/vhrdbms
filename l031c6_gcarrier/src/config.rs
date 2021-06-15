@@ -58,6 +58,17 @@ pub const CELL_OV_THRESHOLD: MilliVolts = MilliVolts(4250);
 /// Clear OV flag when highest cell drop below this threshold
 pub const CELL_OV_CLEAR: MilliVolts = MilliVolts(4100);
 pub const AFE_FAULT_COUNT_TO_HALT: u8 = 20;
+/// Stop precharge and stort normal charge at this cell voltage.
+/// Lowest cell in the stack is used.
+pub const PRECHARGE_THRESHOLD: MilliVolts = MilliVolts(3300);
+pub const PRECHARGE_HYSTERESIS: MilliVolts = MilliVolts(50);
+
+// Voltage dividers
+pub const BAT_DIV_RT: Ohms = Ohms(102_000);
+pub const BAT_DIV_RB: Ohms = Ohms(16_200);
+
+pub const PACK_DIV_RT: Ohms = Ohms(270_000);
+pub const PACK_DIV_RB: Ohms = Ohms(43_000);
 
 // Afe IO
 pub type AfeWakePin = PB4<Output<PushPull>>;
@@ -84,6 +95,7 @@ use bq769x0::MilliVolts;
 use stm32l0xx_hal::gpio::gpiob::{PB9, PB4, PB6, PB7, PB3, PB8, PB0};
 use stm32l0xx_hal::gpio::gpioh::{PH0, PH1};
 use crate::tasks::bms::CellCount;
+use crate::util::Ohms;
 
 pub const HEARTBEAT_INTERVAL_MS: u32 = 1000;
 
