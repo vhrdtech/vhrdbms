@@ -201,11 +201,11 @@ fn afe_command(
                             match offon {
                                 0 => {
                                     writeln!(fmt, "ZVCHG OFF").ok();
-                                    afe_io.zvchg_disable_pin.set_high().ok();
+                                    afe_io.precharge_control_pin.set_high().ok();
                                 },
                                 1 => {
                                     writeln!(fmt, "ZVCHG ON").ok();
-                                    afe_io.zvchg_disable_pin.set_low().ok();
+                                    afe_io.precharge_control_pin.set_low().ok();
                                 },
                                 _ => {},
                             }

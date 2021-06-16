@@ -1,4 +1,5 @@
 use core::fmt::Formatter;
+use core::ops::Sub;
 #[allow(unused_macros)]
 macro_rules! ms2cycles {
     ($clocks:expr, $amount:expr) => {
@@ -33,6 +34,7 @@ pub enum EventSource {
     LocalForward,
     RemoteNoForward,
     RemoteForward,
+    LocalNoStateChangeNoForward,
 }
 
 impl EventSource {
@@ -72,10 +74,18 @@ pub fn current_stack_pointer() -> usize {
 
 pub struct Ohms(pub u32);
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd)]
 pub struct MilliVolts(pub i32);
 impl core::fmt::Display for MilliVolts {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}mV", self.0)
+    }
+}
+impl core::ops::Sub for MilliVolts {
+    type Output = MilliVolts;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        MilliVolts(self.0 - rhs.0)
     }
 }
 

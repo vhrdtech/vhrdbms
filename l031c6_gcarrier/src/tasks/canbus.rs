@@ -13,6 +13,7 @@ use stm32l0xx_hal::time::U32Ext;
 use stm32l0xx_hal::spi::SpiExt;
 use stm32l0xx_hal::prelude::OutputPin;
 use crate::config::Mcp25625Irq;
+use stm32l0xx_hal::exti::{GpioLine, Exti, ExtiLine};
 
 pub struct Mcp25625Parts<SPI> {
     pub cs: Mcp25625Cs,
@@ -194,6 +195,8 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
     let can_tx = cx.resources.can_tx;
     let afe_io = cx.resources.afe_io;
     let rtt = cx.resources.rtt;
+    let clocks = cx.resources.clocks;
+    use mcu_helper::tim_cyccnt::U32Ext;
 
     match e {
         Event::BringDown | Event::_BringDownNoStateChange | Event::BringDownWithPeriodicBringUp => {
@@ -203,11 +206,11 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
                 }
                 Event::BringDownWithPeriodicBringUp => {
                     s.ctrl_state = CtrlState::PeriodicUp;
-                    cx.spawn.canctrl_event(cx.scheduled + ms2cycles!(config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
+                    cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
                 }
                 Event::_BringDownNoStateChange => {
                     if s.ctrl_state == CtrlState::PeriodicUp {
-                        cx.spawn.canctrl_event(cx.scheduled + ms2cycles!(config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
+                        cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
                     } else {
                         return;
                     }
@@ -219,7 +222,7 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
         }
         Event::BringUp | Event::BringUpThenBringDown => {
             if e == Event::BringUpThenBringDown && s.ctrl_state == CtrlState::PeriodicUp {
-                cx.spawn.canctrl_event(cx.scheduled + ms2cycles!(config::CANCTRL_ON_DURATION_MS), Event::_BringDownNoStateChange).ok();
+                cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, config::CANCTRL_ON_DURATION_MS), Event::_BringDownNoStateChange).ok();
             }
             if e == Event::BringUp {
                 s.ctrl_state = CtrlState::Up;

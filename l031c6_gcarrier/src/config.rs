@@ -1,4 +1,4 @@
-use crate::hal;
+use crate::{hal, util};
 
 use hal::gpio::{
     gpioa::*,
@@ -53,6 +53,8 @@ pub const CELL_COUNT: CellCount = CellCount::_4S;
 pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(2950);
 /// Power off after one of the cells drops below this threshold (SW)
 pub const CELL_SOFT_UV_THRESHOLD: MilliVolts = MilliVolts(3150);
+/// Stop charging and disable zero voltage charge fet (if present) at this threshold (SW)
+pub const CELL_SOFT_OV_THRESHOLD: MilliVolts = MilliVolts(4210);
 /// HW overvoltage limit
 pub const CELL_OV_THRESHOLD: MilliVolts = MilliVolts(4250);
 /// Clear OV flag when highest cell drop below this threshold
@@ -62,6 +64,10 @@ pub const AFE_FAULT_COUNT_TO_HALT: u8 = 20;
 /// Lowest cell in the stack is used.
 pub const PRECHARGE_THRESHOLD: MilliVolts = MilliVolts(3300);
 pub const PRECHARGE_HYSTERESIS: MilliVolts = MilliVolts(50);
+/// Charger detection threshold (difference between pack and bat voltages)
+pub const CHARGER_DETECTION_THRESHOLD: util::MilliVolts = util::MilliVolts(50);
+/// Power path configuration
+pub const IS_SEPARATE_CHG_PATH: bool = false;
 
 // Voltage dividers
 pub const BAT_DIV_RT: Ohms = Ohms(102_000);

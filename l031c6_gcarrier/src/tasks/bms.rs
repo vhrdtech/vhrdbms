@@ -63,7 +63,7 @@ pub struct AfeIo {
     pub bat_div_pin: config::BatDivPin,
     pub afe_chg_override: config::AfeChgOverridePin,
     pub afe_dsg_override: config::AfeDsgOverridePin,
-    pub zvchg_disable_pin: config::ZvchgDisablePin,
+    pub precharge_control_pin: config::ZvchgDisablePin,
     pub switch_5v0_s0_en: config::Switch5V0S0Pin,
     pub switch_3v3_s0_en: config::Switch3V3S0Pin,
     pub switch_5v0_aux_en: config::Switch5V0AuxPin,
@@ -155,10 +155,12 @@ pub fn afe_init(
         ov_delay: OVDelay::_4s,
         ov_threshold: config::CELL_OV_THRESHOLD
     };
-    let r = bq769x0.init(i2c, &bq769x0_config).map_err(|e| Error::AfeError(e));
-    bq769x0.enable_adc(i2c, true).ok();
-    bq769x0.coulomb_counter_mode(i2c, bq769x0::CoulombCounterMode::Continuous).ok();
-    r
+    let values = bq769x0.init(i2c, &bq769x0_config).map_err(|e| Error::AfeError(e))?;
+    bq769x0.enable_adc(i2c, true)?;
+    bq769x0.coulomb_counter_mode(i2c, bq769x0::CoulombCounterMode::Continuous)?;
+    bq769x0.discharge(i2c, false)?;
+    bq769x0.charge(i2c, false)?;
+    Ok((values))
 }
 
 pub fn afe_discharge(
@@ -215,6 +217,12 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 return;
             }
             let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
+            if config::IS_SEPARATE_CHG_PATH == false {
+                match bq769x0.charge(i2c, false) {
+                    Ok(_) => { writeln!(rtt, "CHG fet off").ok(); }
+                    Err(_) => {}
+                }
+            }
             bms_state.power_enabled = false;
             writeln!(rtt, "Power disabled").ok();
             cx.spawn.blinker(crate::tasks::led::Event::OffMode).ok();
@@ -224,18 +232,26 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
         },
         BmsEvent::PowerOn(source) => {
-            if bms_state.power_enabled {
-                writeln!(rtt, "Already on").ok();
-                return;
-            }
+            // if bms_state.power_enabled {
+            //     writeln!(rtt, "Already on").ok();
+            //     return;
+            // }
             // crate::board_components::imx_prepare_boot(i2c, rtt);
             let r = afe_discharge(i2c, bq769x0, true);
             let dsg_successful = r.is_ok();
             writeln!(rtt, "DSG successful?: {:?}", r).ok();
             if dsg_successful {
                 // crate::power_block::enable_all(power_blocks);
+                if config::IS_SEPARATE_CHG_PATH == false {
+                    match bq769x0.charge(i2c, true) {
+                        Ok(_) => { writeln!(rtt, "CHG fet on").ok(); }
+                        Err(_) => {}
+                    }
+                }
 
-                bms_state.power_enabled = true;
+                if source != EventSource::LocalNoStateChangeNoForward {
+                    bms_state.power_enabled = true;
+                }
                 bms_state.power_on_fault_count = 0;
                 cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
                 cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringUp).ok();
@@ -323,37 +339,64 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
             }
 
-            match get_v_i_cells(i2c, bq769x0) {
+            let (afe_pack_voltage, pack_current, cell_voltages) = match get_v_i_cells(i2c, bq769x0) {
                 Ok((pack_voltage, pack_current, cell_voltages)) => {
-                    let min_cell = *cell_voltages.iter().min().unwrap_or(&bq769x0::MilliVolts(0));
-                    if min_cell < config::CELL_SOFT_UV_THRESHOLD {
-                        writeln!(rtt, "{}Soft undervoltage{}", color::YELLOW, color::DEFAULT).ok();
-                        cx.spawn.softoff().ok();
-                    }
-
-                    let telemetry = crate::tasks::api::Telemetry {
-                        pack_voltage,
-                        pack_current,
-                        cell_voltages
-                    };
-                    crate::tasks::api::send_telemetry(can_tx, &telemetry);
+                    (pack_voltage, pack_current, cell_voltages)
                 },
                 Err(e) => {
                     writeln!(rtt, "{}V/I/C read err {:?}{}", color::RED, e, color::DEFAULT).ok();
+                    return;
                 }
+            };
+
+            let min_cell = *cell_voltages.iter().min().unwrap_or(&bq769x0::MilliVolts(0));
+            let max_cell = *cell_voltages.iter().max().unwrap_or(&bq769x0::MilliVolts(0));
+            if min_cell < config::CELL_SOFT_UV_THRESHOLD {
+                writeln!(rtt, "{}Soft undervoltage{}", color::YELLOW, color::DEFAULT).ok();
+                cx.spawn.softoff().ok();
             }
+
+            let telemetry = crate::tasks::api::Telemetry {
+                pack_voltage: afe_pack_voltage,
+                pack_current,
+                cell_voltages
+            };
+            crate::tasks::api::send_telemetry(can_tx, &telemetry);
 
             // Enable voltage dividers and give some time for input to stabilise
             afe_io.enable_voltage_dividers();
             delay_ms!(clocks, 1);
             use crate::util::{MilliVolts, resistor_divider_inverse};
-            let bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
-            let bat_voltage = resistor_divider_inverse(config::BAT_DIV_RT, config::BAT_DIV_RB, MilliVolts(bat_voltage as i32));
+            let rdiv_bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            let rdiv_bat_voltage = resistor_divider_inverse(config::BAT_DIV_RT, config::BAT_DIV_RB, MilliVolts(rdiv_bat_voltage as i32));
 
-            let pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
-            let pack_voltage = resistor_divider_inverse(config::PACK_DIV_RT, config::PACK_DIV_RB, MilliVolts(pack_voltage as i32));
-            writeln!(rtt, "{} {}", bat_voltage, pack_voltage).ok();
+            let rdiv_pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            let rdiv_pack_voltage = resistor_divider_inverse(config::PACK_DIV_RT, config::PACK_DIV_RB, MilliVolts(rdiv_pack_voltage as i32));
+            writeln!(rtt, "{} {}", rdiv_bat_voltage, rdiv_pack_voltage).ok();
             afe_io.disable_voltage_dividers();
+
+            if max_cell >= config::CELL_SOFT_OV_THRESHOLD {
+                writeln!(rtt, "{}Soft overvoltage{}", color::RED, color::DEFAULT).ok();
+                #[cfg(feature = "zvhcg-fet-present")]
+                afe_io.precharge_control_pin.set_high().ok(); // disable zvchg depletion fet
+                #[cfg(feature = "precharge-fet-present")]
+                afe_io.precharge_control_pin.set_low().ok(); // disable precharge fet
+                /// TODO: set SOV flag, keep CHG fet only if current is negative
+                bq769x0.charge(i2c, false); // chg fet will overheat if too much current is flowing due to body diode conducting
+            } else if rdiv_pack_voltage - rdiv_bat_voltage >= config::CHARGER_DETECTION_THRESHOLD {
+                if min_cell < config::PRECHARGE_THRESHOLD {
+                    #[cfg(feature = "precharge-fet-present")]
+                    afe_io.precharge_control_pin.set_high().ok();
+                } else {
+                    writeln!(rtt, "Turning on due to charger present").ok();
+                    cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoStateChangeNoForward)).ok();
+                }
+            } else {
+                writeln!(rtt, "Charger removed?").ok();
+                if !bms_state.power_enabled {
+                    cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoStateChangeNoForward)).ok();
+                }
+            }
 
             // if bms_state.charge_enabled {
             //     bms_state.charge_enabled = bq769x0.is_charging(i2c).unwrap_or(false);

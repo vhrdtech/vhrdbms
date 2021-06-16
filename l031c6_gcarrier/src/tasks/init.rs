@@ -210,7 +210,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         bat_div_pin,
         afe_chg_override,
         afe_dsg_override,
-        zvchg_disable_pin,
+        precharge_control_pin: zvchg_disable_pin,
         switch_5v0_s0_en,
         switch_3v3_s0_en,
         switch_5v0_aux_en,
@@ -241,8 +241,6 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
             let _ = writeln!(rtt, "afe init err:{:?}", e);
         }
     }
-    // let r = bq76920.discharge(&mut i2c, true);
-    // let _ = writeln!(rtt, "DE: {:?}", r);
 
     cx.spawn.watchdog().unwrap();
     cx.spawn.bms_event(tasks::bms::BmsEvent::CheckAfe).unwrap();
