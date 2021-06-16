@@ -42,6 +42,7 @@ macro_rules! write_if_cps {
 #[derive(Debug)]
 pub enum Error {
     CodeFault,
+    AlreadyUp,
     McpError(McpErrorKind)
 }
 
@@ -51,10 +52,10 @@ impl From<McpErrorKind> for Error {
     }
 }
 
-pub fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc) -> Result<(), Error> {
+fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc) -> Result<(), Error> {
     let mut mcp_parts = match mcp25625_state {
         Mcp25625State::Operational(_) => {
-            return Err(Error::CodeFault);
+            return Err(Error::AlreadyUp);
         }
         Mcp25625State::PoweredDown(p) => {
             match p.take() {
@@ -110,7 +111,7 @@ fn mcp25625_free(mcp25625: Mcp25625Instance, irq: Mcp25625Irq, rcc: &mut crate::
     }
 }
 
-pub fn mcp25625_bringdown(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc) -> Result<(), Error> {
+fn mcp25625_bringdown(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc) -> Result<(), Error> {
     let (mcp25625, irq) = match mcp25625_state {
         Mcp25625State::Operational(mcp25625) => {
             match mcp25625.take() {
@@ -155,6 +156,58 @@ fn mcp25625_configure(mcp25625: &mut config::Mcp25625Instance) -> Result<(), Mcp
     mcp25625.apply_config(mcp_config)?;
     mcp25625.enable_interrupts(0b0001_1111);
     Ok(())
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum Event {
+    /// Turn off completely
+    BringDown,
+    /// Turn on for indefinite amount of time
+    BringUp,
+    /// Turn on and then turn off, if already on - ignore
+    BringUpThenBringDown,
+    /// Turn off and schedule periodic turn on
+    BringDownWithPeriodicBringUp,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+enum CtrlState {
+    Down,
+    Up,
+    PeriodicUp
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub struct State {
+    ctrl_state: CtrlState
+}
+impl State {
+    pub const fn new() -> Self {
+        State {
+            ctrl_state: CtrlState::Down
+        }
+    }
+}
+
+pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State) {
+    let mcp25625_state = cx.resources.mcp25625_state;
+    let rcc = cx.resources.rcc;
+    let can_tx = cx.resources.can_tx;
+
+    match e {
+        Event::BringDown => {
+            s.ctrl_state = CtrlState::Down;
+        }
+        Event::BringUp => {
+            s.ctrl_state = CtrlState::Up;
+        }
+        Event::BringDownWithPeriodicBringUp => {
+            s.ctrl_state = CtrlState::PeriodicUp;
+        }
+        Event::BringUpThenBringDown => {
+
+        }
+    }
 }
 
 pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {

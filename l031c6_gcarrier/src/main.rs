@@ -79,7 +79,9 @@ const APP: () = {
         spawn = [
             bms_event,
             softoff,
-            blinker
+            blinker,
+            api,
+            canctrl_event
         ]
     )]
     fn bms_event(cx: bms_event::Context, e: tasks::bms::BmsEvent) {
@@ -126,6 +128,7 @@ const APP: () = {
             can_tx
         ],
         schedule = [api],
+        capacity = 4,
     )]
     fn api(cx: api::Context, e: tasks::api::Event) {
         tasks::api::api(cx, e);
@@ -201,6 +204,20 @@ const APP: () = {
     #[task(
         resources = [
             &clocks,
+            mcp25625_state,
+            rcc,
+            can_tx,
+        ],
+        schedule = [canctrl_event],
+    )]
+    fn canctrl_event(mut cx: canctrl_event::Context, e: tasks::canbus::Event) {
+        static mut STATE: tasks::canbus::State = tasks::canbus::State::new();
+        tasks::canbus::canctrl_event(cx, e, &mut *STATE);
+    }
+
+    #[task(
+        resources = [
+            &clocks,
             button,
             button_state,
             rtt
@@ -214,7 +231,7 @@ const APP: () = {
 
     #[idle(
         resources = [i2c, bq76920, rtt, afe_io, adc, rcc, exti, mcp25625_state],
-        spawn = [bms_event]
+        spawn = [bms_event, canctrl_event]
     )]
     fn idle(cx: idle::Context) -> ! {
         tasks::idle::idle(cx);

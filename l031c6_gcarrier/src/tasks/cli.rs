@@ -88,13 +88,19 @@ pub fn cli(
                             i2c_command(&mut args, i2c, rtt);
                         },
                         "mcp" => {
-                            mcp_command(&mut args, afe_io, rcc, mcp25625, rtt);
+                            mcp_command(&mut args, afe_io, rcc, mcp25625, spawn, rtt);
                         },
                         "stack" => {
                             print_stack_usage(rtt);
                         },
                         "status" => {
                             status_command(&mut args, i2c, bq769x0, afe_io, adc, rtt);
+                        }
+                        "s0on" => {
+                            afe_io.enable_s0_switches();
+                        }
+                        "s0off" => {
+                            afe_io.disable_s0_switches();
                         }
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
@@ -426,29 +432,35 @@ fn mcp_command(
     afe_io: &mut tasks::bms::AfeIo,
     rcc: &mut crate::hal::rcc::Rcc,
     mcp25625: &mut crate::tasks::canbus::Mcp25625State,
+    spawn: crate::idle::Spawn,
     fmt: &mut dyn core::fmt::Write
 ) {
     let subcmd = some_or_return!(args.next(), fmt, "mcp dump");
     match subcmd {
         "up" => {
-            if afe_io.is_s0_switches_enabled() {
-                writeln!(fmt, "Already up").ok();
-                return;
-            }
-            afe_io.enable_s0_switches();
-            match crate::tasks::canbus::mcp25625_bringup(mcp25625, rcc) {
-                Ok(()) => {
-                    writeln!(fmt, "Ok").ok();
-                },
-                Err(e) => {
-                    writeln!(fmt, "Err: {:?}", e).ok();
-                    afe_io.disable_s0_switches();
-                }
-            }
+            spawn.canctrl_event(crate::tasks::canbus::Event::BringUp).ok();
+            // if afe_io.is_s0_switches_enabled() {
+            //     writeln!(fmt, "Already up").ok();
+            //     return;
+            // }
+            // afe_io.enable_s0_switches();
+            // match crate::tasks::canbus::mcp25625_bringup(mcp25625, rcc) {
+            //     Ok(()) => {
+            //         writeln!(fmt, "Ok").ok();
+            //     },
+            //     Err(e) => {
+            //         writeln!(fmt, "Err: {:?}", e).ok();
+            //         afe_io.disable_s0_switches();
+            //     }
+            // }
         }
         "down" => {
-            afe_io.disable_s0_switches();
-            crate::tasks::canbus::mcp25625_bringdown(mcp25625, rcc);
+            spawn.canctrl_event(crate::tasks::canbus::Event::BringDown).ok();
+            // afe_io.disable_s0_switches();
+            // crate::tasks::canbus::mcp25625_bringdown(mcp25625, rcc);
+        }
+        "pup" => {
+            spawn.canctrl_event(crate::tasks::canbus::Event::BringUpThenBringDown).ok();
         }
         //         "dump" => {
 //             writeln!(fmt, "\n\nRXF0-RXF2:").ok();

@@ -221,8 +221,9 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             if source.need_to_forward() {
                 crate::tasks::api::broadcast_power_control_frame(can_tx, false);
             }
-            afe_io.disable_s0_switches();
-            crate::tasks::canbus::mcp25625_bringdown(mcp25625_state, rcc);
+            cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
+            // afe_io.disable_s0_switches();
+            // crate::tasks::canbus::mcp25625_bringdown(mcp25625_state, rcc);
         },
         BmsEvent::PowerOn(source) => {
             if bms_state.power_enabled {
@@ -239,20 +240,22 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bms_state.power_enabled = true;
                 bms_state.power_on_fault_count = 0;
                 cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
-                if source.need_to_forward() {
-                    crate::tasks::api::broadcast_power_control_frame(can_tx, true);
-                }
                 afe_io.enable_s0_switches();
-                match crate::tasks::canbus::mcp25625_bringup(mcp25625_state, rcc) {
-                    Ok(()) => {
-                        writeln!(rtt, "McpOk").ok();
-                    },
-                    Err(e) => {
-                        writeln!(rtt, "McpErr: {:?}", e).ok();
-                        afe_io.disable_s0_switches();
-                    }
+                // match crate::tasks::canbus::mcp25625_bringup(mcp25625_state, rcc) {
+                //     Ok(()) => {
+                //         writeln!(rtt, "McpOk").ok();
+                //     },
+                //     Err(e) => {
+                //         writeln!(rtt, "McpErr: {:?}", e).ok();
+                //         afe_io.disable_s0_switches();
+                //     }
+                // }
+                cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringUp).ok();
+                if source.need_to_forward() {
+                    // crate::tasks::api::broadcast_power_control_frame(can_tx, true);
+                    use crate::tasks::api::{Event, PowerBurstContext};
+                    cx.spawn.api(Event::SendPowerOnBurst(PowerBurstContext::new())).ok();
                 }
-
             } else {
                 bms_state.power_on_fault_count += 1;
                 if bms_state.power_on_fault_count > 5 {
@@ -332,22 +335,26 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
                 bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::DEVICE_XREADY).ok();
             }
-            let cells = bq769x0.cell_voltages(i2c).unwrap_or(&[bq769x0::MilliVolts(0); 0]);
-            let soft_undervoltage_cells = find_cells(&cells, |cell, _| {
-                cell < config::CELL_SOFT_UV_THRESHOLD
-            }) & config::CELL_COUNT.cells_mask();
-            if soft_undervoltage_cells != 0 {
-                writeln!(rtt, "{}Soft undervoltage: {:015b} {}", color::YELLOW, soft_undervoltage_cells, color::DEFAULT).ok();
-                cx.spawn.softoff().ok();
-            }
 
-            let telemetry = crate::tasks::api::Telemetry {
-                pack_voltage: bq769x0.voltage(i2c).unwrap_or(bq769x0::MilliVolts(0)),
-                pack_current: bq769x0.current(i2c).unwrap_or(MilliAmperes(0)),
-                // cell_voltages: bq769x0.cell_voltages(i2c).unwrap_or(&[bq769x0::MilliVolts(0); 0])
-                cell_voltages: [bq769x0::MilliVolts(0); 5]
-            };
-            crate::tasks::api::send_telemetry(can_tx, &telemetry);
+            match get_v_i_cells(i2c, bq769x0) {
+                Ok((pack_voltage, pack_current, cell_voltages)) => {
+                    let min_cell = *cell_voltages.iter().min().unwrap_or(&bq769x0::MilliVolts(0));
+                    if min_cell < config::CELL_SOFT_UV_THRESHOLD {
+                        writeln!(rtt, "{}Soft undervoltage{}", color::YELLOW, color::DEFAULT).ok();
+                        cx.spawn.softoff().ok();
+                    }
+
+                    let telemetry = crate::tasks::api::Telemetry {
+                        pack_voltage,
+                        pack_current,
+                        cell_voltages
+                    };
+                    crate::tasks::api::send_telemetry(can_tx, &telemetry);
+                },
+                Err(e) => {
+                    writeln!(rtt, "{}V/I/C read err {:?}{}", color::RED, e, color::DEFAULT).ok();
+                }
+            }
 
             // Enable voltage dividers and give some time for input to stabilise
             afe_io.enable_voltage_dividers();
@@ -433,6 +440,15 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
         //     }
         // }
     }
+}
+
+fn get_v_i_cells<'a>(i2c: &mut config::InternalI2c, bq769x0: &'a mut config::BQ769x0)
+    -> Result<(MilliVolts, MilliAmperes, &'a [MilliVolts]), bq769x0::Error>
+{
+    let v = bq769x0.voltage(i2c)?;
+    let i = bq769x0.current(i2c)?;
+    let cells = bq769x0.cell_voltages(i2c)?;
+    Ok((v, i, cells))
 }
 
 fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(

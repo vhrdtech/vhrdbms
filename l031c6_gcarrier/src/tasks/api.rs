@@ -11,19 +11,44 @@ use core::convert::TryInto;
 #[derive(Debug)]
 pub enum Event {
     SendHeartbeat,
+    SendPowerOnBurst(PowerBurstContext),
 
 }
 
-pub fn api(cx: crate::api::Context, _e: Event) {
+#[derive(Debug)]
+pub struct PowerBurstContext {
+    messages_left: u32
+}
+impl PowerBurstContext {
+    pub fn new() -> Self {
+        PowerBurstContext {
+            messages_left: config::POWER_ON_BURST_DURATION_MS / config::POWER_ON_BURST_INTERVAL_MS
+        }
+    }
+}
+
+pub fn api(cx: crate::api::Context, e: Event) {
     let clocks = cx.resources.clocks;
-
     let can_tx: &mut config::CanTX = cx.resources.can_tx;
-    let frame = can_tx.pool.new_frame(FrameId::new_extended(0x1234567).unwrap(), &[0]).unwrap();
-    let _ = can_tx.heap.push(frame);
-    let frame = can_tx.pool.new_frame(FrameId::new_extended(0x15555555).unwrap(), &[0]).unwrap();
-    let _ = can_tx.heap.push(frame);
+    match e {
+        Event::SendHeartbeat => {
+            let frame = can_tx.pool.new_frame(FrameId::new_extended(uavcan::session_id::message::MessageSessionId::as_u32(50.try_into().unwrap(), 0.try_into().unwrap(), TransferPriority::Optional)).unwrap(), &[]).unwrap();
+            let _ = can_tx.heap.push(frame);
+            cx.schedule.api(cx.scheduled + ms2cycles!(clocks, config::HEARTBEAT_INTERVAL_MS), Event::SendHeartbeat).ok();
+        }
+        Event::SendPowerOnBurst(pcx) => {
+            let payload = r#"ON"#;
+            let frame = can_tx.pool.new_frame(config::POWER_CONTROL_FRAME_ID, payload.as_bytes()).unwrap();
+            let _ = can_tx.heap.push(frame);
+            if pcx.messages_left > 0 {
+                let pcx = PowerBurstContext {
+                    messages_left: pcx.messages_left - 1
+                };
+                cx.schedule.api(cx.scheduled + ms2cycles!(clocks, config::POWER_ON_BURST_INTERVAL_MS), Event::SendPowerOnBurst(pcx)).ok();
+            }
+        }
+    }
 
-    cx.schedule.api(cx.scheduled + ms2cycles!(clocks, config::HEARTBEAT_INTERVAL_MS), Event::SendHeartbeat).ok();
     rtic::pend(config::CAN_TX_HANDLER);
 }
 
@@ -35,10 +60,10 @@ pub fn broadcast_power_control_frame(can_tx: &mut config::CanTX, on: bool) {
 }
 
 #[derive(Serialize)]
-pub struct Telemetry {
+pub struct Telemetry<'a> {
     pub pack_voltage: bq769x0::MilliVolts,
     pub pack_current: bq769x0::MilliAmperes,
-    pub cell_voltages: [bq769x0::MilliVolts; 5],
+    pub cell_voltages: &'a [bq769x0::MilliVolts],
 }
 
 pub fn send_telemetry(can_tx: &mut config::CanTX, telemetry: &Telemetry) {
