@@ -207,6 +207,8 @@ const APP: () = {
             mcp25625_state,
             rcc,
             can_tx,
+            afe_io,
+            rtt,
         ],
         schedule = [canctrl_event],
     )]

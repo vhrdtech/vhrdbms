@@ -222,8 +222,6 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 crate::tasks::api::broadcast_power_control_frame(can_tx, false);
             }
             cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
-            // afe_io.disable_s0_switches();
-            // crate::tasks::canbus::mcp25625_bringdown(mcp25625_state, rcc);
         },
         BmsEvent::PowerOn(source) => {
             if bms_state.power_enabled {
@@ -240,19 +238,8 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bms_state.power_enabled = true;
                 bms_state.power_on_fault_count = 0;
                 cx.spawn.blinker(crate::tasks::led::Event::OnMode).ok();
-                afe_io.enable_s0_switches();
-                // match crate::tasks::canbus::mcp25625_bringup(mcp25625_state, rcc) {
-                //     Ok(()) => {
-                //         writeln!(rtt, "McpOk").ok();
-                //     },
-                //     Err(e) => {
-                //         writeln!(rtt, "McpErr: {:?}", e).ok();
-                //         afe_io.disable_s0_switches();
-                //     }
-                // }
                 cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringUp).ok();
                 if source.need_to_forward() {
-                    // crate::tasks::api::broadcast_power_control_frame(can_tx, true);
                     use crate::tasks::api::{Event, PowerBurstContext};
                     cx.spawn.api(Event::SendPowerOnBurst(PowerBurstContext::new())).ok();
                 }

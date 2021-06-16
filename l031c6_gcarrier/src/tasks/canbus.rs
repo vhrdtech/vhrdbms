@@ -1,5 +1,4 @@
 use core::fmt::Write;
-use stm32l0xx_hal::exti::{Exti, GpioLine, ExtiLine, TriggerEdge};
 use mcp25625::{McpReceiveBuffer, McpPriority, FiltersConfigBuffer0, FiltersMask, FiltersConfigBuffer1, FiltersConfig, MCP25625Config, McpOperationMode, MCP25625, McpErrorKind};
 use crate::config;
 use cfg_if::cfg_if;
@@ -42,7 +41,6 @@ macro_rules! write_if_cps {
 #[derive(Debug)]
 pub enum Error {
     CodeFault,
-    AlreadyUp,
     McpError(McpErrorKind)
 }
 
@@ -55,7 +53,7 @@ impl From<McpErrorKind> for Error {
 fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rcc::Rcc) -> Result<(), Error> {
     let mut mcp_parts = match mcp25625_state {
         Mcp25625State::Operational(_) => {
-            return Err(Error::AlreadyUp);
+            return Ok(());
         }
         Mcp25625State::PoweredDown(p) => {
             match p.take() {
@@ -168,6 +166,7 @@ pub enum Event {
     BringUpThenBringDown,
     /// Turn off and schedule periodic turn on
     BringDownWithPeriodicBringUp,
+    _BringDownNoStateChange,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -193,19 +192,52 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
     let mcp25625_state = cx.resources.mcp25625_state;
     let rcc = cx.resources.rcc;
     let can_tx = cx.resources.can_tx;
+    let afe_io = cx.resources.afe_io;
+    let rtt = cx.resources.rtt;
 
     match e {
-        Event::BringDown => {
-            s.ctrl_state = CtrlState::Down;
+        Event::BringDown | Event::_BringDownNoStateChange | Event::BringDownWithPeriodicBringUp => {
+            match e {
+                Event::BringDown => {
+                    s.ctrl_state = CtrlState::Down;
+                }
+                Event::BringDownWithPeriodicBringUp => {
+                    s.ctrl_state = CtrlState::PeriodicUp;
+                    cx.spawn.canctrl_event(cx.scheduled + ms2cycles!(config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
+                }
+                Event::_BringDownNoStateChange => {
+                    if s.ctrl_state == CtrlState::PeriodicUp {
+                        cx.spawn.canctrl_event(cx.scheduled + ms2cycles!(config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
+                    } else {
+                        return;
+                    }
+                }
+                _ => unreachable!()
+            }
+            afe_io.disable_s0_switches();
+            mcp25625_bringdown(mcp25625_state, rcc);
         }
-        Event::BringUp => {
-            s.ctrl_state = CtrlState::Up;
-        }
-        Event::BringDownWithPeriodicBringUp => {
-            s.ctrl_state = CtrlState::PeriodicUp;
-        }
-        Event::BringUpThenBringDown => {
-
+        Event::BringUp | Event::BringUpThenBringDown => {
+            if e == Event::BringUpThenBringDown && s.ctrl_state == CtrlState::PeriodicUp {
+                cx.spawn.canctrl_event(cx.scheduled + ms2cycles!(config::CANCTRL_ON_DURATION_MS), Event::_BringDownNoStateChange).ok();
+            }
+            if e == Event::BringUp {
+                s.ctrl_state = CtrlState::Up;
+            }
+            if let Mcp25625State::Operational(_) = mcp25625_state {
+                return;
+            }
+            afe_io.enable_s0_switches();
+            can_tx.heap.clear();
+            match mcp25625_bringup(mcp25625_state, rcc) {
+                Ok(()) => {
+                    writeln!(rtt, "McpOk").ok();
+                },
+                Err(e) => {
+                    writeln!(rtt, "McpErr: {:?}", e).ok();
+                    afe_io.disable_s0_switches();
+                }
+            }
         }
     }
 }
