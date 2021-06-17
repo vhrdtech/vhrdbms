@@ -34,7 +34,8 @@ const APP: () = {
         watchdog: IndependedWatchdog,
         bms_state: tasks::bms::BmsState,
         afe_io: tasks::bms::AfeIo,
-        adc: Adc<hal::adc::Ready>,
+        adc: config::Adc,
+        adc_trig_timer: Timer<hal::pac::TIM2>,
         status_led: PB2<Output<PushPull>>,
         rtt: NonBlockingOutput,
         mcp25625_state: tasks::canbus::Mcp25625State,
@@ -49,14 +50,15 @@ const APP: () = {
         button_state: tasks::button::ButtonState,
         softoff_state: tasks::softoff::State,
         charge_indicator: tasks::led::ChargeIndicator,
-        buzzer_pwm_channel: tasks::beeper::BuzzerPwmChannel,
+        // buzzer_pwm_channel: tasks::beeper::BuzzerPwmChannel,
     }
 
     #[init(
         spawn = [bms_event, canctrl_event, api, blinker, watchdog]
     )]
     fn init(cx: init::Context) -> init::LateResources {
-        tasks::init::init(cx)
+        static mut ADC_BUFFER: [u16; config::ADC_BUFFER_SIZE] = [0; config::ADC_BUFFER_SIZE];
+        tasks::init::init(cx, ADC_BUFFER)
     }
 
     #[task(
@@ -87,6 +89,14 @@ const APP: () = {
     )]
     fn bms_event(cx: bms_event::Context, e: tasks::bms::BmsEvent) {
         tasks::bms::bms_event(cx, e);
+    }
+
+    #[task(
+        binds = DMA1_CHANNEL1,
+        resources = [adc, rtt],
+    )]
+    fn adc_dma1_channel1(cx: adc_dma1_channel1::Context) {
+        tasks::adc::adc_dma1_channel1(cx);
     }
 
     #[task(
@@ -241,14 +251,14 @@ const APP: () = {
         tasks::idle::idle(cx);
     }
 
-    #[task(
-        resources = [buzzer_pwm_channel],
-        schedule = [beeper]
-    )]
-    fn beeper(cx: beeper::Context, e: tasks::beeper::Event) {
-        static mut STATE: u32 = 0;
-        tasks::beeper::beeper(cx, e, STATE);
-    }
+    // #[task(
+    //     resources = [buzzer_pwm_channel],
+    //     schedule = [beeper]
+    // )]
+    // fn beeper(cx: beeper::Context, e: tasks::beeper::Event) {
+    //     static mut STATE: u32 = 0;
+    //     tasks::beeper::beeper(cx, e, STATE);
+    // }
 
     extern "C" {
         fn AES_RNG_LPUART1();
@@ -270,6 +280,7 @@ fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
 use core::panic::PanicInfo;
 use stm32l0xx_hal::gpio::gpiob::PB2;
 use mcu_helper::color;
+use stm32l0xx_hal::timer::Timer;
 
 #[inline(never)]
 #[panic_handler]

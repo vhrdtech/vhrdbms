@@ -29,8 +29,10 @@ use crate::config;
 use crate::tasks::led::ChargeIndicator;
 use crate::util::{current_stack_pointer, stack_lower_bound};
 use stm32l0xx_hal::pwm;
+use core::pin::Pin;
+use stm32l0xx_hal::dma::DMA;
 
-pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
+pub fn init(cx: crate::init::Context, adc_buffer: &'static mut [u16; 128]) -> crate::init::LateResources {
     let free_stack_bytes = current_stack_pointer() - stack_lower_bound();
     unsafe {
         let p = stack_lower_bound() as *mut u32;
@@ -58,6 +60,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut exti = Exti::new(device.EXTI);
     let _scb   = core.SCB;
     let mut pwr = PWR::new(device.PWR, &mut rcc);
+    let mut dma = DMA::new(device.DMA1, &mut rcc);
 
     let gpioa = device.GPIOA.split(&mut rcc);
     let gpiob = device.GPIOB.split(&mut rcc);
@@ -79,9 +82,9 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut error_led = gpiob.pb1.into_push_pull_output();
     error_led.set_low().ok();
     // Buzzer
-    let pwm = pwm::Timer::new(device.TIM2, 360.hz(), &mut rcc);
-    let buzzer = gpioa.pa0;
-    let buzzer_pwm_channel = pwm.channel1.assign(buzzer);
+    // let pwm = pwm::Timer::new(device.TIM2, 360.hz(), &mut rcc);
+    // let buzzer = gpioa.pa0;
+    // let buzzer_pwm_channel = pwm.channel1.assign(buzzer);
     // Ring LEDs
     let led1 = gpiob.pb12.into_push_pull_output();
     let led2 = gpiob.pb13.into_push_pull_output();
@@ -156,9 +159,27 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let pack_div_pin = gpioa.pa6.into_analog();
     let bat_div_en_pin = gpioa.pa2.into_push_pull_output();
     let bat_div_pin = gpioa.pa7.into_analog();
+    let adc_buffer = Pin::new(unsafe { adc_buffer });
+    let mut channels = hal::adc::Channels::from(bat_div_pin);
+    channels.add(pack_div_pin);
+
     let mut adc = device.ADC.constrain(&mut rcc);
     adc.set_precision(Precision::B_12);
     adc.set_sample_time(SampleTime::T_160_5);
+    let adc = adc.start(channels,
+              Some(hal::adc::Trigger::TIM2_TRGO),
+              &mut dma.handle,
+              dma.channels.channel1,
+              hal::dma::Interrupts {
+                  transfer_error: false,
+                  half_transfer: false,
+                  transfer_complete: true
+              },
+              adc_buffer);
+    // Enable trigger output for TIM2. This must happen after ADC has been
+    // configured.
+    let mut adc_trig_timer = device.TIM2.timer(100u32.hz(), &mut rcc);
+    adc_trig_timer.select_master_mode(hal::pac::tim2::cr2::MMS_A::UPDATE);
 
     // SPI<->CANBus MCP25625T-E/ML
     // GPIO init
@@ -205,9 +226,9 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         afe_wake_pin,
         dcdc_en_pin: ps_5v0_bms_en,
         pack_div_en_pin,
-        pack_div_pin,
+        // pack_div_pin,
         bat_div_en_pin,
-        bat_div_pin,
+        // bat_div_pin,
         afe_chg_override,
         afe_dsg_override,
         precharge_control_pin: zvchg_disable_pin,
@@ -261,6 +282,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         bms_state,
         afe_io,
         adc,
+        adc_trig_timer,
         status_led,
         rtt,
         mcp25625_state,
@@ -274,7 +296,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         button_state,
         softoff_state,
         charge_indicator,
-        buzzer_pwm_channel,
+        // buzzer_pwm_channel,
 
     }
 }

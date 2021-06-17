@@ -9,3 +9,4 @@ pub mod api;
 pub mod softoff;
 pub mod led;
 pub mod beeper;
+pub mod adc;

@@ -25,15 +25,15 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
                 cx.resources.rtt.lock(|rtt| {
                     i2c.lock(|i2c| {
                         bq769x0.lock(|bq769x0| {
-                             adc.lock(|adc| {
+                             // adc.lock(|adc| {
                                 afe_io.lock(|afe_io| {
                                      mcp25625_state.lock(|mcp25625| {
                                         rcc.lock(|rcc| {
-                                            super::cli::cli(rtt, i2c, bq769x0, spawn, afe_io, rcc, mcp25625, adc);
+                                            super::cli::cli(rtt, i2c, bq769x0, spawn, afe_io, rcc, mcp25625);
                                         })
                                      })
                                 })
-                             })
+                             // })
                         });
                     });
 

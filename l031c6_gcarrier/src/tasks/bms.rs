@@ -60,9 +60,9 @@ pub struct AfeIo {
     pub afe_wake_pin: config::AfeWakePin,
     pub dcdc_en_pin: config::DcDcEnPin,
     pub pack_div_en_pin: config::PackDivEnPin,
-    pub pack_div_pin: config::PackDivPin,
+    // pub pack_div_pin: config::PackDivPin,
     pub bat_div_en_pin: config::BatDivEnPin,
-    pub bat_div_pin: config::BatDivPin,
+    // pub bat_div_pin: config::BatDivPin,
     pub afe_chg_override: config::AfeChgOverridePin,
     pub afe_dsg_override: config::AfeDsgOverridePin,
     pub precharge_control_pin: config::ZvchgDisablePin,
@@ -376,10 +376,12 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             afe_io.enable_voltage_dividers();
             delay_ms!(clocks, 10);
             use crate::util::{MilliVolts, resistor_divider_inverse};
-            let rdiv_bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            // let rdiv_bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            let rdiv_bat_voltage = 0u16;
             let rdiv_bat_voltage = resistor_divider_inverse(config::BAT_DIV_RT, config::BAT_DIV_RB, MilliVolts(rdiv_bat_voltage as i32));
 
-            let rdiv_pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            // let rdiv_pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+            let rdiv_pack_voltage = 0u16;
             let rdiv_pack_voltage = resistor_divider_inverse(config::PACK_DIV_RT, config::PACK_DIV_RB, MilliVolts(rdiv_pack_voltage as i32));
             let pack_bat_diff = rdiv_pack_voltage - rdiv_bat_voltage;
             writeln!(rtt, "b:{} p:{} d:{}", rdiv_bat_voltage, rdiv_pack_voltage, pack_bat_diff).ok();

@@ -54,7 +54,7 @@ pub fn cli(
     afe_io: &mut tasks::bms::AfeIo,
     rcc: &mut crate::hal::rcc::Rcc,
     mcp25625: &mut crate::tasks::canbus::Mcp25625State,
-    adc: &mut Adc<crate::hal::adc::Ready>,
+    // adc: &mut Adc<crate::hal::adc::Ready>,
 ) {
     let mut rtt_down = [0u8; 128];
     let rtt_down_len = jlink_rtt::try_read(&mut rtt_down);
@@ -73,7 +73,7 @@ pub fn cli(
                             writeln!(rtt, "cmds: afe, pb, imx, reset, halt, tms").ok();
                         },
                         "afe" => {
-                            afe_command(&mut args, i2c, bq769x0, afe_io, adc, rtt);
+                            afe_command(&mut args, i2c, bq769x0, afe_io, rtt);
                         },
                         // "pb" => {
                         //     power_blocks_command(&mut args, power_blocks, rtt);
@@ -94,7 +94,7 @@ pub fn cli(
                             print_stack_usage(rtt);
                         },
                         "status" => {
-                            status_command(&mut args, i2c, bq769x0, afe_io, adc, rtt);
+                            status_command(&mut args, i2c, bq769x0, afe_io,  rtt);
                         }
                         "s0on" => {
                             afe_io.enable_s0_switches();
@@ -139,7 +139,7 @@ fn afe_command(
     i2c: &mut config::InternalI2c,
     bq769x0: &mut config::BQ769x0,
     afe_io: &mut tasks::bms::AfeIo,
-    adc: &mut Adc<crate::hal::adc::Ready>,
+    // adc: &mut Adc<crate::hal::adc::Ready>,
     fmt: &mut dyn core::fmt::Write,
 ) {
     let afe_part = args.next();
@@ -247,7 +247,7 @@ fn afe_command(
                 },
                 "vi" => {
                     // Enable voltage dividers and give some time for input to stabilise
-                    afe_io.enable_voltage_dividers();
+                    // afe_io.enable_voltage_dividers();
                     // Read AFE ADC
                     let i = bq769x0.current(i2c);
                     let v = bq769x0.voltage(i2c);
@@ -265,21 +265,23 @@ fn afe_command(
                         }
                     }
                     // Read analog ADC inputs
-                    adc.calibrate_vdda();
+                    // adc.calibrate_vdda();
 
-                    let mut vtemp_channel = VTemp::new();
-                    vtemp_channel.enable(adc);
-                    let vtemp = (adc.read(&mut vtemp_channel) as Result<u16, _>).map(|t| Adc::to_degrees_centigrade(t)).unwrap_or(0);
+                    // let mut vtemp_channel = VTemp::new();
+                    // vtemp_channel.enable(adc);
+                    // let vtemp = (adc.read(&mut vtemp_channel) as Result<u16, _>).map(|t| Adc::to_degrees_centigrade(t)).unwrap_or(0);
                     // let vtemp = (adc.read(&mut vtemp_channel) as Result<u16, _>).unwrap_or(0);
-                    vtemp_channel.disable(adc);
+                    // vtemp_channel.disable(adc);
 
                     // let cal130 = stm32l0xx_hal::signature::VtempCal130::get().read();
                     // let cal30 = stm32l0xx_hal::signature::VtempCal30::get().read();
 
-                    let bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
-                    let pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
-                    writeln!(fmt, "{} {} {}C", bat_voltage, pack_voltage, vtemp).ok();
-                    afe_io.disable_voltage_dividers();
+                    // let bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+                    // let pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
+                    // let bat_voltage = 0;
+                    // let pack_voltage = 0;
+                    // writeln!(fmt, "{} {} {}C", bat_voltage, pack_voltage, vtemp).ok();
+                    // afe_io.disable_voltage_dividers();
                     return;
                 },
                 "bal" => {
@@ -525,7 +527,7 @@ fn status_command(
     _i2c: &mut config::InternalI2c,
     _bq769x0: &mut config::BQ769x0,
     _afe_io: &mut tasks::bms::AfeIo,
-    _adc: &mut Adc<crate::hal::adc::Ready>,
+    // _adc: &mut Adc<crate::hal::adc::Ready>,
     _fmt: &mut dyn core::fmt::Write,
 ) {
 

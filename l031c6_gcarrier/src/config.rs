@@ -125,3 +125,6 @@ pub const CANCTRL_OFF_DURATION_MS: u32 = 4800;
 pub const CANCTRL_ON_DURATION_MS: u32 = 200;
 
 pub const UAVCAN_NODE_ID: u8 = 50;
+
+pub const ADC_BUFFER_SIZE: usize = 128;
+pub type Adc = hal::adc::Adc<hal::adc::Active<hal::dma::Channel1, &'static mut [u16; ADC_BUFFER_SIZE]>>;
