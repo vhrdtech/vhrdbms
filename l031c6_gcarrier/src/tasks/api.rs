@@ -32,7 +32,7 @@ pub fn api(cx: crate::api::Context, e: Event) {
     let can_tx: &mut config::CanTX = cx.resources.can_tx;
     match e {
         Event::SendHeartbeat => {
-            let frame = can_tx.pool.new_frame(FrameId::new_extended(uavcan::session_id::message::MessageSessionId::as_u32(50.try_into().unwrap(), 0.try_into().unwrap(), TransferPriority::Optional)).unwrap(), &[]).unwrap();
+            let frame = can_tx.pool.new_frame(FrameId::new_extended(uavcan::session_id::message::MessageSessionId::as_u32(config::UAVCAN_NODE_ID.try_into().unwrap(), 0.try_into().unwrap(), TransferPriority::Optional)).unwrap(), &[]).unwrap();
             let _ = can_tx.heap.push(frame);
             cx.schedule.api(cx.scheduled + ms2cycles!(clocks, config::HEARTBEAT_INTERVAL_MS), Event::SendHeartbeat).ok();
         }
@@ -56,6 +56,8 @@ pub fn broadcast_power_control_frame(can_tx: &mut config::CanTX, on: bool) {
     let payload = if on { r#"ON"# } else { r#"OFF"# };
     let frame = can_tx.pool.new_frame(config::POWER_CONTROL_FRAME_ID, payload.as_bytes()).unwrap();
     let _ = can_tx.heap.push(frame);
+    let _ = can_tx.heap.push(frame);
+    let _ = can_tx.heap.push(frame);
     rtic::pend(config::CAN_TX_HANDLER);
 }
 
@@ -71,7 +73,7 @@ pub fn send_telemetry(can_tx: &mut config::CanTX, telemetry: &Telemetry) {
     let used = postcard::to_slice(telemetry, &mut buf);
     if let Ok(payload) = used {
         for (frame_data, frame_len) in uavcan_bridge::to_uavcan(payload) {
-            let frame = can_tx.pool.new_frame(FrameId::new_extended(uavcan::session_id::message::MessageSessionId::as_u32(50.try_into().unwrap(), 10.try_into().unwrap(), TransferPriority::Optional)).unwrap(), &frame_data[..frame_len]).unwrap();
+            let frame = can_tx.pool.new_frame(FrameId::new_extended(uavcan::session_id::message::MessageSessionId::as_u32(config::UAVCAN_NODE_ID.try_into().unwrap(), 10.try_into().unwrap(), TransferPriority::Optional)).unwrap(), &frame_data[..frame_len]).unwrap();
             let _ = can_tx.heap.push(frame);
         }
     }
@@ -93,6 +95,8 @@ pub fn can_rx(cx: crate::can_rx::Context) {
                 } else {
                     cx.spawn.softoff().ok();
                 }
+            } else if frame.data().eq(r#"HALT"#.as_bytes()) {
+                cx.spawn.bms_event(BmsEvent::Halt).ok();
             }
         }
     }

@@ -75,6 +75,7 @@ const APP: () = {
         capacity = 8,
         schedule = [
             bms_event,
+            canctrl_event,
         ],
         spawn = [
             bms_event,

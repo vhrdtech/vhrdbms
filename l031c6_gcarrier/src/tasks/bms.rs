@@ -238,13 +238,13 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             if source.need_to_forward() {
                 crate::tasks::api::broadcast_power_control_frame(can_tx, false);
             }
-            cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
+            cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, 100), crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
         },
         BmsEvent::PowerOn(source) => {
-            // if bms_state.power_enabled {
-            //     writeln!(rtt, "Already on").ok();
-            //     return;
-            // }
+            if bms_state.power_enabled {
+                writeln!(rtt, "Already on").ok();
+                return;
+            }
             // crate::board_components::imx_prepare_boot(i2c, rtt);
             let r = afe_discharge(i2c, bq769x0, true);
             let dsg_successful = r.is_ok();
@@ -374,7 +374,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
 
             // Enable voltage dividers and give some time for input to stabilise
             afe_io.enable_voltage_dividers();
-            delay_ms!(clocks, 1);
+            delay_ms!(clocks, 10);
             use crate::util::{MilliVolts, resistor_divider_inverse};
             let rdiv_bat_voltage = (adc.read(&mut afe_io.bat_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
             let rdiv_bat_voltage = resistor_divider_inverse(config::BAT_DIV_RT, config::BAT_DIV_RB, MilliVolts(rdiv_bat_voltage as i32));
@@ -402,9 +402,11 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     afe_io.precharge_control_pin.set_high().ok();
                     bms_state.precharge_enabled = true;
                 } else {
-                    writeln!(rtt, "Turning on due to charger present").ok();
-                    cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoStateChangeNoForward)).ok();
-                    bms_state.charge_enabled = true;
+                    if bms_state.charge_enabled == false {
+                        writeln!(rtt, "Turning on due to charger present").ok();
+                        cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoStateChangeNoForward)).ok();
+                        bms_state.charge_enabled = true;
+                    }
                 }
             } else {
                 if bms_state.charge_enabled && pack_current < config::CHARGE_STOP_CURRENT {

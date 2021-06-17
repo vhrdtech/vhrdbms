@@ -33,7 +33,7 @@ pub fn softoff(cx: crate::softoff::Context) {
         },
         State::TurnOffInProgress(notifications_sent) => {
             if config::SOFTOFF_TIMEOUT_MS / config::SOFTOFF_NOTIFY_INTERVAL_MS == notifications_sent {
-                cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoForward)).ok(); // TODO: bb
+                cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalForward)).ok(); // TODO: bb
                 State::Initial
             } else {
                 cx.schedule.softoff(cx.scheduled + ms2cycles!(cx.resources.clocks, config::SOFTOFF_NOTIFY_INTERVAL_MS)).ok(); // TODO: bb;

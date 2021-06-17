@@ -119,7 +119,9 @@ pub const SOFTOFF_NOTIFY_FRAME_ID: FrameId = FrameId::new_extended(0x15E).unwrap
 pub const POWER_CONTROL_FRAME_ID: FrameId = FrameId::new_standard(0x7).unwrap();
 
 pub const POWER_ON_BURST_INTERVAL_MS: u32 = 25;
-pub const POWER_ON_BURST_DURATION_MS: u32 = 5_000;
+pub const POWER_ON_BURST_DURATION_MS: u32 = 10_000;
 
 pub const CANCTRL_OFF_DURATION_MS: u32 = 4800;
 pub const CANCTRL_ON_DURATION_MS: u32 = 200;
+
+pub const UAVCAN_NODE_ID: u8 = 50;
