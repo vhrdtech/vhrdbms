@@ -242,6 +242,15 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         }
     }
 
+    let mut lptim = hal::lptim::LpTimer::init_periodic(device.LPTIM, &mut pwr, &mut rcc, hal::lptim::ClockSrc::Apb1);
+    let exti_line = hal::exti::DirectLine::Lptim1;
+    lptim.enable_interrupts(hal::lptim::Interrupts {
+        autoreload_match: true,
+        ..hal::lptim::Interrupts::default()
+    });
+    exti.listen_direct(exti_line);
+    lptim.start(2.hz());
+
     cx.spawn.watchdog().unwrap();
     cx.spawn.bms_event(tasks::bms::BmsEvent::CheckAfe).unwrap();
     cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();

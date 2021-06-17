@@ -93,7 +93,7 @@ const APP: () = {
         capacity = 3,
         resources = [
             &clocks,
-            status_led,
+            // status_led,
             can_tx,
             charge_indicator,
             rtt
@@ -106,6 +106,14 @@ const APP: () = {
         static mut STATE: bool = false;
         static mut COUNTER: u8 = 0;
         tasks::led::blinker(cx, e, STATE, COUNTER);
+    }
+
+    #[task(
+        binds = LPTIM1,
+        resources = [status_led]
+    )]
+    fn tim_blinker(cx: tim_blinker::Context) {
+        tasks::led::tim_blinker(cx);
     }
 
     #[task(

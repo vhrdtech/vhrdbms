@@ -3,6 +3,8 @@ use mcu_helper::tim_cyccnt::U32Ext;
 use stm32l0xx_hal::gpio::gpiob::{PB12, PB13, PB14, PB11, PB15};
 use stm32l0xx_hal::gpio::{PushPull, Output};
 use stm32l0xx_hal::gpio::gpioa::PA8;
+use stm32l0xx_hal::exti::Exti;
+use cortex_m::peripheral::NVIC;
 // use core::fmt::Write;
 
 #[derive(Debug)]
@@ -48,7 +50,7 @@ impl ChargeIndicator {
 pub fn blinker(cx: crate::blinker::Context, e: Event, on: &mut bool, counter: &mut u8) {
     match e {
         Event::Toggle => {
-            cx.resources.status_led.toggle().ok();
+            // cx.resources.status_led.toggle().ok();
             let schedule_at = cx.scheduled + if *on {
                 cx.resources.charge_indicator.on_one(*counter);
                 *counter += 1;
@@ -70,4 +72,13 @@ pub fn blinker(cx: crate::blinker::Context, e: Event, on: &mut bool, counter: &m
             *on = false;
         }
     }
+}
+
+pub fn tim_blinker(cx: crate::tim_blinker::Context) {
+    let exti_line = crate::hal::exti::DirectLine::Lptim1;
+    Exti::unpend(exti_line);
+    NVIC::unpend(crate::hal::pac::Interrupt::LPTIM1);
+
+    cx.resources.status_led.toggle().ok();
+
 }
