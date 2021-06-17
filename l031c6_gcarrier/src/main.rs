@@ -53,7 +53,7 @@ const APP: () = {
     }
 
     #[init(
-        spawn = [bms_event, api, blinker, watchdog]
+        spawn = [bms_event, canctrl_event, api, blinker, watchdog]
     )]
     fn init(cx: init::Context) -> init::LateResources {
         tasks::init::init(cx)
@@ -211,6 +211,7 @@ const APP: () = {
             rtt,
         ],
         schedule = [canctrl_event],
+        capacity = 4,
     )]
     fn canctrl_event(mut cx: canctrl_event::Context, e: tasks::canbus::Event) {
         static mut STATE: tasks::canbus::State = tasks::canbus::State::new();

@@ -33,6 +33,8 @@ pub enum BmsEvent {
 #[derive(Default)]
 pub struct BmsState {
     power_enabled: bool,
+    precharge_enabled: bool,
+    charge_enabled: bool,
 
     //charge_enabled: bool,
     //vchg_prev_mv: u32,
@@ -199,6 +201,8 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let can_tx = cx.resources.can_tx;
     let mcp25625_state = cx.resources.mcp25625_state;
 
+    writeln!(rtt, "p_en: {}", bms_state.power_enabled).ok();
+
     match e {
         BmsEvent::TogglePower(source) => {
             if bms_state.power_enabled {
@@ -213,7 +217,12 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             }
         },
         BmsEvent::PowerOff(source) => {
-            if !bms_state.power_enabled {
+            // if !bms_state.power_enabled {
+            //     return;
+            // }
+            if bms_state.charge_enabled && config::IS_SEPARATE_CHG_PATH == false {
+                writeln!(rtt, "Ignoring off due to charge").ok();
+                bms_state.power_enabled = false;
                 return;
             }
             let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
@@ -372,8 +381,9 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
 
             let rdiv_pack_voltage = (adc.read(&mut afe_io.pack_div_pin) as Result<u16, _>).map(|v| adc.to_millivolts(v)).unwrap_or(0);
             let rdiv_pack_voltage = resistor_divider_inverse(config::PACK_DIV_RT, config::PACK_DIV_RB, MilliVolts(rdiv_pack_voltage as i32));
-            writeln!(rtt, "{} {}", rdiv_bat_voltage, rdiv_pack_voltage).ok();
-            afe_io.disable_voltage_dividers();
+            let pack_bat_diff = rdiv_pack_voltage - rdiv_bat_voltage;
+            writeln!(rtt, "b:{} p:{} d:{}", rdiv_bat_voltage, rdiv_pack_voltage, pack_bat_diff).ok();
+            // afe_io.disable_voltage_dividers();
 
             if max_cell >= config::CELL_SOFT_OV_THRESHOLD {
                 writeln!(rtt, "{}Soft overvoltage{}", color::RED, color::DEFAULT).ok();
@@ -383,18 +393,27 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 afe_io.precharge_control_pin.set_low().ok(); // disable precharge fet
                 /// TODO: set SOV flag, keep CHG fet only if current is negative
                 bq769x0.charge(i2c, false); // chg fet will overheat if too much current is flowing due to body diode conducting
-            } else if rdiv_pack_voltage - rdiv_bat_voltage >= config::CHARGER_DETECTION_THRESHOLD {
+                bms_state.precharge_enabled = false;
+                bms_state.charge_enabled = false;
+            } else if pack_bat_diff >= config::CHARGER_DETECTION_THRESHOLD && max_cell < config::CHARGE_START_MIN_VOLTAGE {
                 if min_cell < config::PRECHARGE_THRESHOLD {
+                    writeln!(rtt, "Precharge (too low v)").ok();
                     #[cfg(feature = "precharge-fet-present")]
                     afe_io.precharge_control_pin.set_high().ok();
+                    bms_state.precharge_enabled = true;
                 } else {
                     writeln!(rtt, "Turning on due to charger present").ok();
                     cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoStateChangeNoForward)).ok();
+                    bms_state.charge_enabled = true;
                 }
             } else {
-                writeln!(rtt, "Charger removed?").ok();
-                if !bms_state.power_enabled {
-                    cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoStateChangeNoForward)).ok();
+                if bms_state.charge_enabled && pack_current < config::CHARGE_STOP_CURRENT {
+                    writeln!(rtt, "Charger removed?").ok();
+                    if !bms_state.power_enabled {
+                        cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoStateChangeNoForward)).ok();
+                    }
+                    bms_state.charge_enabled = false;
+                    bms_state.precharge_enabled = false;
                 }
             }
 

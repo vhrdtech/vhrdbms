@@ -157,7 +157,7 @@ fn mcp25625_configure(mcp25625: &mut config::Mcp25625Instance) -> Result<(), Mcp
     Ok(())
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Event {
     /// Turn off completely
     BringDown,
@@ -198,6 +198,7 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
     let clocks = cx.resources.clocks;
     use mcu_helper::tim_cyccnt::U32Ext;
 
+    writeln!(rtt, "{:?}", e).ok();
     match e {
         Event::BringDown | Event::_BringDownNoStateChange | Event::BringDownWithPeriodicBringUp => {
             match e {
@@ -219,6 +220,7 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
             }
             afe_io.disable_s0_switches();
             mcp25625_bringdown(mcp25625_state, rcc);
+            writeln!(rtt, "McpDown").ok();
         }
         Event::BringUp | Event::BringUpThenBringDown => {
             if e == Event::BringUpThenBringDown && s.ctrl_state == CtrlState::PeriodicUp {
@@ -228,6 +230,9 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
                 s.ctrl_state = CtrlState::Up;
             }
             if let Mcp25625State::Operational(_) = mcp25625_state {
+                return;
+            }
+            if s.ctrl_state == CtrlState::Down {
                 return;
             }
             afe_io.enable_s0_switches();

@@ -68,6 +68,10 @@ pub const PRECHARGE_HYSTERESIS: MilliVolts = MilliVolts(50);
 pub const CHARGER_DETECTION_THRESHOLD: util::MilliVolts = util::MilliVolts(50);
 /// Power path configuration
 pub const IS_SEPARATE_CHG_PATH: bool = false;
+/// Stop charging and disable CHG & DSG mosfets when current drop below this.
+pub const CHARGE_STOP_CURRENT: MilliAmperes = MilliAmperes(100);
+/// If min cell is above this threshold and charger is present, do not start charging to prevent endless turn-on-off cycle.
+pub const CHARGE_START_MIN_VOLTAGE: MilliVolts = MilliVolts(4000);
 
 // Voltage dividers
 pub const BAT_DIV_RT: Ohms = Ohms(102_000);
@@ -97,7 +101,7 @@ pub const BALANCE_START_DELTA_MV: u32 = 300;
 // CanBus Protocol
 use stm32l0xx_hal::pac::Interrupt;
 use vhrdcan::FrameId;
-use bq769x0::MilliVolts;
+use bq769x0::{MilliVolts, MilliAmperes};
 use stm32l0xx_hal::gpio::gpiob::{PB9, PB4, PB6, PB7, PB3, PB8, PB0};
 use stm32l0xx_hal::gpio::gpioh::{PH0, PH1};
 use crate::tasks::bms::CellCount;

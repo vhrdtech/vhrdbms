@@ -247,6 +247,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     cx.spawn.bms_event(tasks::bms::BmsEvent::CheckBalancing).unwrap();
     cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
     cx.spawn.blinker(tasks::led::Event::Toggle).unwrap();
+    cx.spawn.canctrl_event(tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
     rtic::pend(config::BUTTON_IRQ); // if we got to this point, button was pressed
 
     let bms_state = tasks::bms::BmsState::default();

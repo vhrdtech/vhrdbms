@@ -462,6 +462,9 @@ fn mcp_command(
         "pup" => {
             spawn.canctrl_event(crate::tasks::canbus::Event::BringUpThenBringDown).ok();
         }
+        "pdown" => {
+            spawn.canctrl_event(crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
+        }
         //         "dump" => {
 //             writeln!(fmt, "\n\nRXF0-RXF2:").ok();
 //             for addr in 0b0000_0000..=0b0000_1011 {
