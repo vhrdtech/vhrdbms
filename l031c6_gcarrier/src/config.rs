@@ -124,4 +124,4 @@ pub const POWER_ON_BURST_DURATION_MS: u32 = 10_000;
 pub const CANCTRL_OFF_DURATION_MS: u32 = 4800;
 pub const CANCTRL_ON_DURATION_MS: u32 = 200;
 
-pub const UAVCAN_NODE_ID: u8 = 50;
+pub const UAVCAN_NODE_ID: u8 = 53;

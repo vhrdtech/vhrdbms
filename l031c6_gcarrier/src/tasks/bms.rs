@@ -395,7 +395,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 bq769x0.charge(i2c, false); // chg fet will overheat if too much current is flowing due to body diode conducting
                 bms_state.precharge_enabled = false;
                 bms_state.charge_enabled = false;
-            } else if pack_bat_diff >= config::CHARGER_DETECTION_THRESHOLD && max_cell < config::CHARGE_START_MIN_VOLTAGE {
+            } else if pack_bat_diff >= config::CHARGER_DETECTION_THRESHOLD && max_cell < config::CHARGE_START_MIN_VOLTAGE && bms_state.power_enabled == false {
                 if min_cell < config::PRECHARGE_THRESHOLD {
                     writeln!(rtt, "Precharge (too low v)").ok();
                     #[cfg(feature = "precharge-fet-present")]
