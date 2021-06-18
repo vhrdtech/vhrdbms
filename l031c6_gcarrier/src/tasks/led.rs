@@ -3,6 +3,7 @@ use mcu_helper::tim_cyccnt::U32Ext;
 use stm32l0xx_hal::gpio::gpiob::{PB12, PB13, PB14, PB11, PB15};
 use stm32l0xx_hal::gpio::{PushPull, Output};
 use stm32l0xx_hal::gpio::gpioa::PA8;
+use stm32l0xx_hal::pac::Interrupt;
 // use core::fmt::Write;
 
 #[derive(Debug)]
@@ -61,6 +62,7 @@ pub fn blinker(cx: crate::blinker::Context, e: Event, on: &mut bool, counter: &m
                 ms2cycles!(cx.resources.clocks, 2000)
             };
             cx.schedule.blinker(schedule_at, Event::Toggle).ok();
+            rtic::pend(Interrupt::DMA1_CHANNEL1);
             // writeln!(cx.resources.rtt, ".").ok();
         }
         Event::OnMode => {

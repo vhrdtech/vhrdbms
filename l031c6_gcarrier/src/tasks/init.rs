@@ -178,7 +178,7 @@ pub fn init(cx: crate::init::Context, adc_buffer: &'static mut [u16; 128]) -> cr
               adc_buffer);
     // Enable trigger output for TIM2. This must happen after ADC has been
     // configured.
-    let mut adc_trig_timer = device.TIM2.timer(100u32.hz(), &mut rcc);
+    let mut adc_trig_timer = device.TIM2.timer(1000u32.hz(), &mut rcc);
     adc_trig_timer.select_master_mode(hal::pac::tim2::cr2::MMS_A::UPDATE);
 
     // SPI<->CANBus MCP25625T-E/ML
