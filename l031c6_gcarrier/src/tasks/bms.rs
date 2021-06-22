@@ -35,6 +35,7 @@ pub struct BmsState {
     power_enabled: bool,
     precharge_enabled: bool,
     charge_enabled: bool,
+    scd_count: u32,
 
     //charge_enabled: bool,
     //vchg_prev_mv: u32,
@@ -174,7 +175,7 @@ pub fn afe_discharge(
         bq769x0.discharge(i2c, false)?;
         return Ok(());
     }
-    for _ in 0..10 {
+    for _ in 0..2 {
         bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT)?;
         bq769x0.discharge(i2c, true)?;
         cortex_m::asm::delay(400_000);
@@ -233,6 +234,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 }
             }
             bms_state.power_enabled = false;
+            bms_state.scd_count = 0;
             writeln!(rtt, "Power disabled").ok();
             cx.spawn.blinker(crate::tasks::led::Event::OffMode).ok();
             if source.need_to_forward() {
@@ -270,12 +272,17 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 }
             } else {
                 bms_state.power_on_fault_count += 1;
-                if bms_state.power_on_fault_count > 5 {
-                    bms_state.power_enabled = false;
+                if bms_state.power_on_fault_count >= config::POWER_ON_FAILURE_COUNT_TILL_OFF {
+                    writeln!(rtt, "{}On giving up{}", color::RED, color::DEFAULT).ok();
+                    cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoForward)).ok();
+                } else {
+                    cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::POWER_ON_FAILURE_RESTART_TIMEOUT_MS), BmsEvent::PowerOn(EventSource::LocalNoForward)).ok();
                 }
             }
         }
         BmsEvent::CheckAfe => {
+            cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckAfe).ok();
+
             let sys_stat = match bq769x0.sys_stat(i2c) {
                 Ok(s) => { s },
                 Err(e) => {
@@ -330,10 +337,17 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             //     Err(_) => {}
             // }
             if sys_stat.scd_is_set() | sys_stat.ocd_is_set() { // TODO: add max amount of restarts here?
-                writeln!(rtt, "{}SCD/OCD detected{}", color::YELLOW, color::DEFAULT).ok();
-                bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT).ok();
+                let r = bq769x0.sys_stat_reset(i2c, bq769x0::SysStat::SHORTCIRCUIT | bq769x0::SysStat::OVERCURRENT);
+                writeln!(rtt, "{}SCD/OCD detected, clear: {:?}{}", color::YELLOW, r, color::DEFAULT).ok();
                 if bms_state.power_enabled {
-                    cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoForward)).ok();
+                    if bms_state.scd_count < config::SCD_COUNT_TILL_OFF {
+                        bms_state.power_enabled = false;
+                        bms_state.scd_count += 1;
+                        cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::LocalNoForward)).ok();
+                    } else {
+                        writeln!(rtt, "{}SCD giving up{}", color::RED, color::DEFAULT).ok();
+                        cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoForward)).ok();
+                    }
                 }
             }
             if sys_stat.undervoltage_is_set() {
@@ -383,7 +397,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             let rdiv_pack_voltage = resistor_divider_inverse(config::PACK_DIV_RT, config::PACK_DIV_RB, MilliVolts(rdiv_pack_voltage as i32));
             let pack_bat_diff = rdiv_pack_voltage - rdiv_bat_voltage;
             writeln!(rtt, "b:{} p:{} d:{}", rdiv_bat_voltage, rdiv_pack_voltage, pack_bat_diff).ok();
-            // afe_io.disable_voltage_dividers();
+            afe_io.disable_voltage_dividers();
 
             if max_cell >= config::CELL_SOFT_OV_THRESHOLD {
                 writeln!(rtt, "{}Soft overvoltage{}", color::RED, color::DEFAULT).ok();
@@ -456,7 +470,6 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             //     }
             //     bms_state.vchg_prev_mv = vchg;
             // }
-            cx.schedule.bms_event(cx.scheduled + ms2cycles!(clocks, config::CHARGER_CHECK_INTERVAL_MS), BmsEvent::CheckAfe).ok();
         },
         BmsEvent::CheckBalancing => {
             // let _ = check_balancing(i2c, bq769x0, &mut bms_state.balancing_state, rtt);

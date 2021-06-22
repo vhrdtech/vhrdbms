@@ -72,6 +72,9 @@ pub const IS_SEPARATE_CHG_PATH: bool = false;
 pub const CHARGE_STOP_CURRENT: MilliAmperes = MilliAmperes(100);
 /// If min cell is above this threshold and charger is present, do not start charging to prevent endless turn-on-off cycle.
 pub const CHARGE_START_MIN_VOLTAGE: MilliVolts = MilliVolts(4000);
+pub const SCD_COUNT_TILL_OFF: u32 = 3;
+pub const POWER_ON_FAILURE_COUNT_TILL_OFF: u8 = 3;
+pub const POWER_ON_FAILURE_RESTART_TIMEOUT_MS: u32 = 3_000;
 
 // Voltage dividers
 pub const BAT_DIV_RT: Ohms = Ohms(102_000);
@@ -124,4 +127,4 @@ pub const POWER_ON_BURST_DURATION_MS: u32 = 10_000;
 pub const CANCTRL_OFF_DURATION_MS: u32 = 4800;
 pub const CANCTRL_ON_DURATION_MS: u32 = 200;
 
-pub const UAVCAN_NODE_ID: u8 = 53;
+pub const UAVCAN_NODE_ID: u8 = 57;
