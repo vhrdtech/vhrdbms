@@ -133,15 +133,6 @@ pub enum CellCount {
     _4S = 4,
     _5S = 5,
 }
-impl CellCount {
-    pub fn cells_mask(&self) -> u16 {
-        match self {
-            CellCount::_3S => { 0b10011 }
-            CellCount::_4S => { 0b10111 }
-            CellCount::_5S => { 0b11111 }
-        }
-    }
-}
 
 pub fn afe_init(
     i2c: &mut config::InternalI2c,
@@ -163,7 +154,7 @@ pub fn afe_init(
     bq769x0.coulomb_counter_mode(i2c, bq769x0::CoulombCounterMode::Continuous)?;
     bq769x0.discharge(i2c, false)?;
     bq769x0.charge(i2c, false)?;
-    Ok((values))
+    Ok(values)
 }
 
 pub fn afe_discharge(
@@ -196,11 +187,11 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     let bq769x0: &mut config::BQ769x0 = cx.resources.bq76920;
     let rtt = cx.resources.rtt;
     let clocks = cx.resources.clocks;
-    let rcc = cx.resources.rcc;
+    // let rcc = cx.resources.rcc;
     let adc = cx.resources.adc;
     let afe_io: &mut AfeIo = cx.resources.afe_io;
     let can_tx = cx.resources.can_tx;
-    let mcp25625_state = cx.resources.mcp25625_state;
+    // let mcp25625_state = cx.resources.mcp25625_state;
 
     writeln!(rtt, "p_en: {}", bms_state.power_enabled).ok();
 
@@ -211,7 +202,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     cx.spawn.bms_event(BmsEvent::PowerOff(source)).ok();
                 } else {
                     writeln!(rtt, "Softoff spawned").ok();
-                    cx.spawn.softoff().ok();
+                    cx.spawn.softoff(crate::tasks::softoff::Event::new_start_soft_off()).ok();
                 }
             } else {
                 cx.spawn.bms_event(BmsEvent::PowerOn(source)).ok();
@@ -233,14 +224,17 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                     Err(_) => {}
                 }
             }
+            if bms_state.power_enabled {
+                cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, config::POWER_OFF_BURST_DURATION_MS + 100), crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
+            }
             bms_state.power_enabled = false;
             bms_state.scd_count = 0;
             writeln!(rtt, "Power disabled").ok();
             cx.spawn.blinker(crate::tasks::led::Event::OffMode).ok();
             if source.need_to_forward() {
-                crate::tasks::api::broadcast_power_control_frame(can_tx, false);
+                use crate::tasks::api::{Event, PowerBurstContext};
+                cx.spawn.api(Event::SendPowerOffBurst(PowerBurstContext::new_off())).ok();
             }
-            cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, 100), crate::tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
         },
         BmsEvent::PowerOn(source) => {
             if bms_state.power_enabled {
@@ -268,7 +262,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 cx.spawn.canctrl_event(crate::tasks::canbus::Event::BringUp).ok();
                 if source.need_to_forward() {
                     use crate::tasks::api::{Event, PowerBurstContext};
-                    cx.spawn.api(Event::SendPowerOnBurst(PowerBurstContext::new())).ok();
+                    cx.spawn.api(Event::SendPowerOnBurst(PowerBurstContext::new_on())).ok();
                 }
             } else {
                 bms_state.power_on_fault_count += 1;
@@ -372,11 +366,16 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 }
             };
 
+            let cells_sum_voltage = cell_voltages.iter().fold(0, |acc, v| acc + v.0 as i32);
+            if (cells_sum_voltage - afe_pack_voltage.0 as i32).abs() > 1000 {
+                writeln!(rtt, "{}Cell count seems to be invalid!{}", color::YELLOW, color::DEFAULT).ok();
+            }
+
             let min_cell = *cell_voltages.iter().min().unwrap_or(&bq769x0::MilliVolts(0));
             let max_cell = *cell_voltages.iter().max().unwrap_or(&bq769x0::MilliVolts(0));
-            if min_cell < config::CELL_SOFT_UV_THRESHOLD {
+            if min_cell < config::CELL_SOFT_UV_THRESHOLD && !(bms_state.charge_enabled || bms_state.precharge_enabled) {
                 writeln!(rtt, "{}Soft undervoltage{}", color::YELLOW, color::DEFAULT).ok();
-                cx.spawn.softoff().ok();
+                cx.spawn.softoff(crate::tasks::softoff::Event::new_start_soft_off()).ok();
             }
 
             let telemetry = crate::tasks::api::Telemetry {
@@ -384,7 +383,9 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
                 pack_current,
                 cell_voltages
             };
-            crate::tasks::api::send_telemetry(can_tx, &telemetry);
+            if bms_state.power_enabled {
+                crate::tasks::api::send_telemetry(can_tx, &telemetry);
+            }
 
             // Enable voltage dividers and give some time for input to stabilise
             afe_io.enable_voltage_dividers();
@@ -401,17 +402,19 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
 
             if max_cell >= config::CELL_SOFT_OV_THRESHOLD {
                 writeln!(rtt, "{}Soft overvoltage{}", color::RED, color::DEFAULT).ok();
-                #[cfg(feature = "zvhcg-fet-present")]
+                #[cfg(feature = "zvchg-fet-present")]
                 afe_io.precharge_control_pin.set_high().ok(); // disable zvchg depletion fet
                 #[cfg(feature = "precharge-fet-present")]
                 afe_io.precharge_control_pin.set_low().ok(); // disable precharge fet
-                /// TODO: set SOV flag, keep CHG fet only if current is negative
-                bq769x0.charge(i2c, false); // chg fet will overheat if too much current is flowing due to body diode conducting
+                // TODO: set SOV flag, keep CHG fet only if current is negative
+                bq769x0.charge(i2c, false).ok(); // TODO: chg fet will overheat if too much current is flowing due to body diode conducting
                 bms_state.precharge_enabled = false;
                 bms_state.charge_enabled = false;
             } else if pack_bat_diff >= config::CHARGER_DETECTION_THRESHOLD && max_cell < config::CHARGE_START_MIN_VOLTAGE && bms_state.power_enabled == false {
                 if min_cell < config::PRECHARGE_THRESHOLD {
                     writeln!(rtt, "Precharge (too low v)").ok();
+                    #[cfg(feature = "zvchg-fet-present")]
+                    afe_io.precharge_control_pin.set_low().ok();
                     #[cfg(feature = "precharge-fet-present")]
                     afe_io.precharge_control_pin.set_high().ok();
                     bms_state.precharge_enabled = true;
@@ -515,21 +518,21 @@ fn get_v_i_cells<'a>(i2c: &mut config::InternalI2c, bq769x0: &'a mut config::BQ7
     Ok((v, i, cells))
 }
 
-fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
-    // i2c: &mut config::InternalI2c,
-    // bq769x0: &mut config::BQ769x0,
-    cells: &[MilliVolts],
-    f: F
-) -> u16 {
-    // let cells = bq769x0.cell_voltages(i2c)?;
-    let low_cell = *cells.iter().min().unwrap();
-    let cells = cells
-        .iter()
-        .map(|cell| f(*cell, low_cell))
-        .enumerate().map(|(i, c)| (c as u16) << i)
-        .fold(0u16, |acc, cell_mask| acc | cell_mask);
-    cells
-}
+// fn find_cells<F: Fn(MilliVolts, MilliVolts) -> bool>(
+//     // i2c: &mut config::InternalI2c,
+//     // bq769x0: &mut config::BQ769x0,
+//     cells: &[MilliVolts],
+//     f: F
+// ) -> u16 {
+//     // let cells = bq769x0.cell_voltages(i2c)?;
+//     let low_cell = *cells.iter().min().unwrap();
+//     let cells = cells
+//         .iter()
+//         .map(|cell| f(*cell, low_cell))
+//         .enumerate().map(|(i, c)| (c as u16) << i)
+//         .fold(0u16, |acc, cell_mask| acc | cell_mask);
+//     cells
+// }
 
 // fn check_balancing(
 //     i2c: &mut config::InternalI2c,

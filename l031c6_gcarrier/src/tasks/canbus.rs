@@ -3,10 +3,6 @@ use mcp25625::{McpReceiveBuffer, McpPriority, FiltersConfigBuffer0, FiltersMask,
 use crate::config;
 use cfg_if::cfg_if;
 use mcu_helper::color;
-use stm32l0xx_hal::gpio::gpioa::{PA9, PA11, PA12};
-use stm32l0xx_hal::gpio::gpiob::PB3;
-use stm32l0xx_hal::gpio::{Analog, Output, PushPull};
-use vhrdcan::FrameId;
 
 use config::{Mcp25625Cs, Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi, Mcp25625Spi, Mcp25625Instance, Mcp25625IrqUninit};
 use stm32l0xx_hal::time::U32Ext;
@@ -14,6 +10,7 @@ use stm32l0xx_hal::spi::SpiExt;
 use stm32l0xx_hal::prelude::OutputPin;
 use crate::config::Mcp25625Irq;
 use stm32l0xx_hal::exti::{GpioLine, Exti, ExtiLine};
+use vhrdcan::FrameId;
 
 pub struct Mcp25625Parts<SPI> {
     pub cs: Mcp25625Cs,
@@ -93,7 +90,7 @@ fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rc
 
 fn mcp25625_free(mcp25625: Mcp25625Instance, irq: Mcp25625Irq, rcc: &mut crate::hal::rcc::Rcc) -> Mcp25625Parts<Mcp25625Spi> {
     let (spi, mut cs) = mcp25625.release();
-    let (spi, (mut sck, miso, mut mosi)) = spi.free(rcc);
+    let (spi, (sck, miso, mosi)) = spi.free(rcc);
     cs.set_low().ok();
     let mut sck = sck.into_push_pull_output();
     sck.set_low().ok();
@@ -206,8 +203,10 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
                     s.ctrl_state = CtrlState::Down;
                 }
                 Event::BringDownWithPeriodicBringUp => {
-                    s.ctrl_state = CtrlState::PeriodicUp;
-                    cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
+                    if s.ctrl_state != CtrlState::PeriodicUp {
+                        cx.schedule.canctrl_event(cx.scheduled + ms2cycles!(clocks, config::CANCTRL_OFF_DURATION_MS), Event::BringUpThenBringDown).ok();
+                        s.ctrl_state = CtrlState::PeriodicUp;
+                    }
                 }
                 Event::_BringDownNoStateChange => {
                     if s.ctrl_state == CtrlState::PeriodicUp {
@@ -219,8 +218,9 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
                 _ => unreachable!()
             }
             afe_io.disable_s0_switches();
-            mcp25625_bringdown(mcp25625_state, rcc);
-            writeln!(rtt, "McpDown").ok();
+            let r = mcp25625_bringdown(mcp25625_state, rcc);
+            writeln!(rtt, "McpDown {}", r.is_ok()).ok();
+
         }
         Event::BringUp | Event::BringUpThenBringDown => {
             if e == Event::BringUpThenBringDown && s.ctrl_state == CtrlState::PeriodicUp {
@@ -330,10 +330,18 @@ pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
     write_if_cps!(rtt, "TEC: {}, REC: {}", tec, rec);
 
     for _ in 0..3 {
-        match can_tx.heap.pop() {
+        let maybe_frame = can_tx.heap.peek().cloned();
+        match maybe_frame {
             Some(frame) => {
-                match mcp25625.send(frame.as_raw_frame_ref(), McpPriority::Highest) {
+                // Treat extended id frames as uavcan, use only one buffer for them to avoid priority inversion
+                // If standard id frame is placed after extended one it will have to wait with this implementation!
+                let buffer_choice = match frame.id() {
+                    FrameId::Standard(_) => { mcp25625::TxBufferChoice::Any }
+                    FrameId::Extended(_) => { mcp25625::TxBufferChoice::OnlyOne(0) }
+                };
+                match mcp25625.send(frame.as_raw_frame_ref(), buffer_choice, McpPriority::Highest) {
                     Ok(_) => {
+                        let _ = can_tx.heap.pop();
                         write_if_cps!(rtt, "{}TX: {:?}{}", color::CYAN, frame, color::DEFAULT);
                     }
                     Err(e) => {
