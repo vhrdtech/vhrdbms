@@ -15,7 +15,7 @@ power_helper = { path = "../power_helper" }
 #rtt-target = { version = "0.2.2" }
 jlink_rtt = { git = "https://github.com/romixlab/jlink_rtt" }
 mcp25625 = { path = "../../mcp25625" }
-bq769x0 = { path = "../../bq769x0", features = ["crc"] }
+bq769x0 = { path = "../../bq769x0" }
 heapless = "0.5"
 hash32 = "0.1"
 cfg-if = "1.0.0"
@@ -51,5 +51,7 @@ cli = []
 bitbang-i2c = ["bitbang-hal"]
 softoff = []
 canbus-printstat = []
-zvhcg-fet-present = []
+zvchg-fet-present = []
 precharge-fet-present = []
+bq769x0-with-crc = ["bq769x0/crc"]
+bq769x0-alt-address = []
