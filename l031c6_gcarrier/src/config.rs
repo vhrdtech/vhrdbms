@@ -9,7 +9,7 @@ use hal::gpio::{Analog, PushPull, Output, OpenDrain};
 
 //
 pub const CHARGER_CHECK_INTERVAL_MS: u32 = 2000;
-pub const BALANCING_CHECK_INTERVAL_MS: u32 = 5000;
+// pub const BALANCING_CHECK_INTERVAL_MS: u32 = 5000;
 
 // Mcp25625
 pub type Mcp25625Sck = PB3<Analog>;
@@ -49,6 +49,10 @@ pub const BUTTON_IRQ: Interrupt = Interrupt::EXTI4_15; // keep in sync with butt
 const BQ769X0_VARIANT: usize = bq769x0::BQ76920;
 pub type BQ769x0 = bq769x0::BQ769x0<{ BQ769X0_VARIANT }>;
 pub const CELL_COUNT: CellCount = CellCount::_4S;
+#[cfg(feature = "bq769x0-alt-address")]
+pub const BQ769X0_ADDRESS: u8 = 0x18;
+#[cfg(not(feature = "bq769x0-alt-address"))]
+pub const BQ769X0_ADDRESS: u8 = 0x08;
 /// Halt after one of the cells drops below this threshold (HW)
 pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(2950);
 /// Power off after one of the cells drops below this threshold (SW)
@@ -58,12 +62,12 @@ pub const CELL_SOFT_OV_THRESHOLD: MilliVolts = MilliVolts(4210);
 /// HW overvoltage limit
 pub const CELL_OV_THRESHOLD: MilliVolts = MilliVolts(4250);
 /// Clear OV flag when highest cell drop below this threshold
-pub const CELL_OV_CLEAR: MilliVolts = MilliVolts(4100);
+// pub const CELL_OV_CLEAR: MilliVolts = MilliVolts(4100);
 pub const AFE_FAULT_COUNT_TO_HALT: u8 = 20;
 /// Stop precharge and stort normal charge at this cell voltage.
 /// Lowest cell in the stack is used.
 pub const PRECHARGE_THRESHOLD: MilliVolts = MilliVolts(3300);
-pub const PRECHARGE_HYSTERESIS: MilliVolts = MilliVolts(50);
+// pub const PRECHARGE_HYSTERESIS: MilliVolts = MilliVolts(50);
 /// Charger detection threshold (difference between pack and bat voltages)
 pub const CHARGER_DETECTION_THRESHOLD: util::MilliVolts = util::MilliVolts(50);
 /// Power path configuration
@@ -98,7 +102,7 @@ pub type Switch3V3S0Pin = PA4<Output<PushPull>>;
 pub type Switch5V0AuxPin = PB0<Output<PushPull>>;
 
 // Balancing
-pub const BALANCE_START_DELTA_MV: u32 = 300;
+// pub const BALANCE_START_DELTA_MV: u32 = 300;
 // pub const BALANCE_STOP_DELTA_MV: u32 = 5;
 
 // CanBus Protocol
@@ -121,10 +125,11 @@ pub const SOFTOFF_NOTIFY_INTERVAL_MS: u32 = 1_000;
 pub const SOFTOFF_NOTIFY_FRAME_ID: FrameId = FrameId::new_extended(0x15E).unwrap();
 pub const POWER_CONTROL_FRAME_ID: FrameId = FrameId::new_standard(0x7).unwrap();
 
-pub const POWER_ON_BURST_INTERVAL_MS: u32 = 25;
-pub const POWER_ON_BURST_DURATION_MS: u32 = 10_000;
+pub const POWER_ON_OFF_BURST_INTERVAL_MS: u32 = 15;
+pub const POWER_ON_BURST_DURATION_MS: u32 = CANCTRL_OFF_DURATION_MS * 2 + 2_000;
+pub const POWER_OFF_BURST_DURATION_MS: u32 = 1_000;
 
 pub const CANCTRL_OFF_DURATION_MS: u32 = 4800;
 pub const CANCTRL_ON_DURATION_MS: u32 = 200;
 
-pub const UAVCAN_NODE_ID: u8 = 57;
+pub const UAVCAN_NODE_ID: u8 = 55;
