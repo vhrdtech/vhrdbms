@@ -1,6 +1,6 @@
 use stm32l0xx_hal::prelude::{ToggleableOutputPin, OutputPin};
 use mcu_helper::tim_cyccnt::U32Ext;
-use stm32l0xx_hal::gpio::gpiob::{PB12, PB13, PB14, PB11, PB15};
+use stm32l0xx_hal::gpio::gpiob::{PB12, PB13, PB14, PB11};
 use stm32l0xx_hal::gpio::{PushPull, Output};
 use stm32l0xx_hal::gpio::gpioa::PA8;
 // use core::fmt::Write;
@@ -18,7 +18,7 @@ pub struct ChargeIndicator {
     pub led3: PB14<Output<PushPull>>,
     pub led4: PB11<Output<PushPull>>,
     pub led5: PA8<Output<PushPull>>,
-    pub led6: PB15<Output<PushPull>>,
+    // pub led6: PB15<Output<PushPull>>,
 }
 
 impl ChargeIndicator {
@@ -28,7 +28,7 @@ impl ChargeIndicator {
         self.led3.set_low().ok();
         self.led4.set_low().ok();
         self.led5.set_low().ok();
-        self.led6.set_low().ok();
+        // self.led6.set_low().ok();
     }
 
     pub fn on_one(&mut self, idx: u8) {
@@ -39,7 +39,7 @@ impl ChargeIndicator {
             2 => { self.led3.set_high().ok(); },
             3 => { self.led4.set_high().ok(); },
             4 => { self.led5.set_high().ok(); },
-            5 => { self.led6.set_high().ok(); },
+            // 5 => { self.led6.set_high().ok(); },
             _ => {}
         }
     }

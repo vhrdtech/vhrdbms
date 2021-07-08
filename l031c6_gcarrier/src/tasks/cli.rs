@@ -9,7 +9,6 @@ use btoi::{btoi, ParseIntegerError, btoi_radix};
 use no_std_compat::prelude::v1::*;
 use crate::hal::prelude::*;
 use stm32l0xx_hal::adc::{Adc, VTemp};
-use crate::tasks::canbus::Mcp25625State;
 
 macro_rules! ok_or_return {
     ($e: expr, $fmt: ident, $message: expr) => {
@@ -429,9 +428,9 @@ fn i2c_command(
 
 fn mcp_command(
     args: &mut core::str::SplitAsciiWhitespace,
-    afe_io: &mut tasks::bms::AfeIo,
-    rcc: &mut crate::hal::rcc::Rcc,
-    mcp25625: &mut crate::tasks::canbus::Mcp25625State,
+    _afe_io: &mut tasks::bms::AfeIo,
+    _rcc: &mut crate::hal::rcc::Rcc,
+    _mcp25625: &mut crate::tasks::canbus::Mcp25625State,
     spawn: crate::idle::Spawn,
     fmt: &mut dyn core::fmt::Write
 ) {

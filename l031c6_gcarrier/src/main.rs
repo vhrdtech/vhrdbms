@@ -47,7 +47,6 @@ const APP: () = {
         exti: Exti,
         button: config::ButtonPin,
         button_state: tasks::button::ButtonState,
-        softoff_state: tasks::softoff::State,
         charge_indicator: tasks::led::ChargeIndicator,
         buzzer_pwm_channel: tasks::beeper::BuzzerPwmChannel,
     }
@@ -152,13 +151,13 @@ const APP: () = {
         resources = [
             &clocks,
             can_tx,
-            softoff_state,
         ],
         schedule = [softoff],
         spawn = [bms_event]
     )]
-    fn softoff(cx: softoff::Context) {
-        tasks::softoff::softoff(cx);
+    fn softoff(cx: softoff::Context, e: tasks::softoff::Event) {
+        static mut STATE: tasks::softoff::State = tasks::softoff::State::new();
+        tasks::softoff::softoff(cx, e, STATE);
     }
 
     // #[task(
@@ -214,7 +213,7 @@ const APP: () = {
         schedule = [canctrl_event],
         capacity = 4,
     )]
-    fn canctrl_event(mut cx: canctrl_event::Context, e: tasks::canbus::Event) {
+    fn canctrl_event(cx: canctrl_event::Context, e: tasks::canbus::Event) {
         static mut STATE: tasks::canbus::State = tasks::canbus::State::new();
         tasks::canbus::canctrl_event(cx, e, &mut *STATE);
     }

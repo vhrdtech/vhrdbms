@@ -18,8 +18,6 @@ use hal::{
     rtc::{Instant, RTC, ClockSource as RtcClockSource},
 };
 
-use mcp25625::MCP25625;
-
 use cfg_if::cfg_if;
 use stm32l0xx_hal::adc::{Precision, SampleTime};
 use bq769x0::BQ769x0;
@@ -88,9 +86,10 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let led3 = gpiob.pb14.into_push_pull_output();
     let led4 = gpiob.pb11.into_push_pull_output();
     let led5 = gpioa.pa8.into_push_pull_output();
-    let led6 = gpiob.pb15.into_push_pull_output();
+    // let led6 = gpiob.pb15.into_push_pull_output();
+    let _pwm_cpump = gpiob.pb15.into_floating_input();
     let charge_indicator = ChargeIndicator {
-        led1, led2, led3, led4, led5, led6
+        led1, led2, led3, led4, led5
     };
 
     // Communication with charger
@@ -229,7 +228,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
             }
         }
     // Prepare bq76920 config
-    let mut bq76920 = BQ769x0::new(0x08, config::CELL_COUNT as u8).unwrap();
+    let mut bq76920 = BQ769x0::new(config::BQ769X0_ADDRESS, config::CELL_COUNT as u8).unwrap();
     match crate::tasks::bms::afe_init(&mut i2c, &mut bq76920) {
         Ok(_actual) => {
             let _ = writeln!(rtt, "afe init ok");
@@ -252,7 +251,6 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
 
     let bms_state = tasks::bms::BmsState::default();
     let button_state = tasks::button::ButtonState::default();
-    let softoff_state = tasks::softoff::State::default();
 
      crate::init::LateResources {
         clocks,
@@ -272,7 +270,6 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         exti,
         button,
         button_state,
-        softoff_state,
         charge_indicator,
         buzzer_pwm_channel,
 

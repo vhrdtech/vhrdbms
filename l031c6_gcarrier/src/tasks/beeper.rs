@@ -9,6 +9,6 @@ pub enum Event {
 
 }
 
-pub fn beeper(cx: crate::beeper::Context, e: Event, state: &mut u32,) {
+pub fn beeper(_cx: crate::beeper::Context, _e: Event, _state: &mut u32,) {
 
 }
