@@ -1,5 +1,4 @@
 use core::fmt::Formatter;
-use core::ops::Sub;
 #[allow(unused_macros)]
 macro_rules! ms2cycles {
     ($clocks:expr, $amount:expr) => {
@@ -91,4 +90,16 @@ impl core::ops::Sub for MilliVolts {
 
 pub fn resistor_divider_inverse(rt: Ohms, rb: Ohms, vin: MilliVolts) -> MilliVolts {
     MilliVolts(vin.0 * (rt.0 as i32 + rb.0 as i32) / rb.0 as i32)
+}
+
+macro_rules! uavcan_frameid {
+    ($node_id:expr, $subject_id:expr) => {{
+        use core::convert::TryInto;
+        vhrdcan::FrameId::new_extended(
+            uavcan::session_id::message::MessageSessionId::as_u32(
+                $node_id.try_into().unwrap(),
+                $subject_id.try_into().unwrap(),
+                uavcan::session_id::transfer_priority::TransferPriority::Optional)
+        ).unwrap()
+    }}
 }
