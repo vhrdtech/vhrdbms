@@ -198,7 +198,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
     match e {
         BmsEvent::TogglePower(source) => {
             if bms_state.power_enabled {
-                if config::SOFTOFF_TIMEOUT_MS == 0 {
+                if config::Config::get().softoff_timeout == 0 {
                     cx.spawn.bms_event(BmsEvent::PowerOff(source)).ok();
                 } else {
                     writeln!(rtt, "Softoff spawned").ok();

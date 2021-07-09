@@ -54,6 +54,7 @@ pub fn cli(
     rcc: &mut crate::hal::rcc::Rcc,
     mcp25625: &mut crate::tasks::canbus::Mcp25625State,
     adc: &mut Adc<crate::hal::adc::Ready>,
+    flash: &mut crate::hal::flash::FLASH,
 ) {
     let mut rtt_down = [0u8; 128];
     let rtt_down_len = jlink_rtt::try_read(&mut rtt_down);
@@ -100,6 +101,12 @@ pub fn cli(
                         }
                         "s0off" => {
                             afe_io.disable_s0_switches();
+                        }
+                        "eeprom" => {
+                            eeprom_command(&mut args, flash, rtt);
+                        }
+                        "config" => {
+                            writeln!(rtt, "{:?}", config::Config::get()).ok();
                         }
                         _ => {
                             writeln!(rtt, "{}UC{}", color::YELLOW, color::DEFAULT).ok();
@@ -528,4 +535,43 @@ fn status_command(
     _fmt: &mut dyn core::fmt::Write,
 ) {
 
+}
+
+fn eeprom_command(
+    args: &mut core::str::SplitAsciiWhitespace,
+    flash: &mut crate::hal::flash::FLASH,
+    fmt: &mut dyn core::fmt::Write,
+) {
+    let subcmd = some_or_return!(args.next(), fmt, "eeprom read/write rel_addr_dec [byte/word hex]");
+    let addr = some_or_return!(args.next(), fmt, "wrong addr");
+    let addr: Result<usize, ParseIntegerError> = btoi_radix(addr.as_bytes(), 16);
+    let addr = ok_or_return!(addr, fmt, "wrong addr");
+    let addr_u = crate::hal::flash::EEPROM_START_BANK1 + addr;
+    let addr = addr_u as *mut u8;
+
+    match subcmd {
+        "read8" => {
+            let byte = unsafe { *addr };
+            writeln!(fmt, "0x{:08x} = 0x{:02x} = 0b{:08b}", addr_u, byte, byte).ok();
+        }
+        "read32" => {
+            let word = unsafe { *(addr as *const u32) };
+            writeln!(fmt, "0x{:08x} = 0x{:08x} = 0b{:032b}", addr_u, word, word).ok();
+        }
+        "write8" => {
+            let byte = some_or_return!(args.next(), fmt, "wrong byte");
+            let byte: Result<u8, ParseIntegerError> = btoi_radix(byte.as_bytes(), 16);
+            let byte = ok_or_return!(byte, fmt, "wrong byte");
+            let r = flash.write_byte(addr, byte);
+            writeln!(fmt, "{}", r.is_ok()).ok();
+        }
+        "write32" => {
+            let word = some_or_return!(args.next(), fmt, "wrong byte");
+            let word: Result<u32, ParseIntegerError> = btoi_radix(word.as_bytes(), 16);
+            let word = ok_or_return!(word, fmt, "wrong byte");
+            let r = flash.write_word(addr as *mut u32, word);
+            writeln!(fmt, "{}", r.is_ok()).ok();
+        }
+        _ => {}
+    }
 }

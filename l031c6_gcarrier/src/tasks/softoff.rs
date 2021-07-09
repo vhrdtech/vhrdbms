@@ -46,7 +46,7 @@ pub fn softoff(cx: crate::softoff::Context, e: Event, state: &mut State) {
     let can_tx: &mut config::CanTX = cx.resources.can_tx;
     *state = match *state {
         State::Initial => {
-            if config::SOFTOFF_TIMEOUT_MS == 0 {
+            if config::Config::get().softoff_timeout == 0 {
                 cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalNoForward)).ok(); // TODO: bb
                 State::Initial
             } else {
@@ -58,7 +58,7 @@ pub fn softoff(cx: crate::softoff::Context, e: Event, state: &mut State) {
             if e.e == InternalEvent::StartSoftOffProcess {
                 return;
             }
-            if config::SOFTOFF_TIMEOUT_MS / config::SOFTOFF_NOTIFY_INTERVAL_MS == notifications_sent {
+            if config::Config::get().softoff_timeout / config::SOFTOFF_NOTIFY_INTERVAL_MS == notifications_sent {
                 cx.spawn.bms_event(BmsEvent::PowerOff(EventSource::LocalForward)).ok(); // TODO: bb
                 State::Initial
             } else {

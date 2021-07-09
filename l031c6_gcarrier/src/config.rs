@@ -49,10 +49,8 @@ pub const BUTTON_IRQ: Interrupt = Interrupt::EXTI4_15; // keep in sync with butt
 const BQ769X0_VARIANT: usize = bq769x0::BQ76920;
 pub type BQ769x0 = bq769x0::BQ769x0<{ BQ769X0_VARIANT }>;
 pub const CELL_COUNT: CellCount = CellCount::_4S;
-#[cfg(feature = "bq769x0-alt-address")]
 pub const BQ769X0_ADDRESS: u8 = 0x18;
-#[cfg(not(feature = "bq769x0-alt-address"))]
-pub const BQ769X0_ADDRESS: u8 = 0x08;
+pub const BQ769X0_ALT_ADDRESS: u8 = 0x08;
 /// Halt after one of the cells drops below this threshold (HW)
 pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(2950);
 /// Power off after one of the cells drops below this threshold (SW)
@@ -117,10 +115,6 @@ use crate::util::Ohms;
 pub const HEARTBEAT_INTERVAL_MS: u32 = 1000;
 
 // Soft off
-#[cfg(feature = "softoff")]
-pub const SOFTOFF_TIMEOUT_MS: u32 = 20_000;
-#[cfg(not(feature = "softoff"))]
-pub const SOFTOFF_TIMEOUT_MS: u32 = 0;
 pub const SOFTOFF_NOTIFY_INTERVAL_MS: u32 = 1_000;
 pub const SOFTOFF_NOTIFY_FRAME_ID: FrameId = FrameId::new_extended(0x15E).unwrap();
 pub const POWER_CONTROL_FRAME_ID: FrameId = FrameId::new_standard(0x7).unwrap();
@@ -132,4 +126,45 @@ pub const POWER_OFF_BURST_DURATION_MS: u32 = 1_000;
 pub const CANCTRL_OFF_DURATION_MS: u32 = 4800;
 pub const CANCTRL_ON_DURATION_MS: u32 = 200;
 
-pub const UAVCAN_NODE_ID: u8 = 55;
+#[repr(C)]
+#[derive(Debug)]
+pub struct Config {
+    pub crc: u8,
+
+    pub zvchg_fet_present: bool,
+    pub pchg_fet_present: bool,
+
+    pub uavcan_node_id: u8,
+
+    pub softoff_timeout: u32,
+}
+impl Config {
+    pub fn get() -> &'static Self {
+        unsafe {
+            let addr = crate::hal::flash::EEPROM_START_BANK1 as *const Config;
+            &(*addr)
+        }
+    }
+
+    // pub fn as_slice() -> &'static [u8] {
+    //     unsafe {
+    //         let addr = crate::hal::flash::EEPROM_START_BANK1 as *const u8;
+    //         core::slice::from_raw_parts(addr, core::mem::size_of::<Config>())
+    //     }
+    // }
+
+    pub fn calculate_crc() -> u8 {
+        let mut crc = crc_any::CRCu8::crc8();
+        let config = Self::get();
+        let config_without_crc = unsafe {
+            core::slice::from_raw_parts((config as *const _ as *const u8).offset(1), core::mem::size_of::<Config>() - 1)
+        };
+        crc.digest(config_without_crc);
+        crc.get_crc()
+    }
+
+    pub fn is_crc_correct() -> bool {
+        let config = Self::get();
+        config.crc == Self::calculate_crc()
+    }
+}

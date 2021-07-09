@@ -32,6 +32,7 @@ const APP: () = {
         clocks: hal::rcc::Clocks,
         rcc: hal::rcc::Rcc,
         watchdog: IndependedWatchdog,
+        flash: hal::flash::FLASH,
         bms_state: tasks::bms::BmsState,
         afe_io: tasks::bms::AfeIo,
         adc: Adc<hal::adc::Ready>,
@@ -233,7 +234,7 @@ const APP: () = {
     }
 
     #[idle(
-        resources = [i2c, bq76920, rtt, afe_io, adc, rcc, exti, mcp25625_state],
+        resources = [i2c, bq76920, rtt, afe_io, adc, rcc, exti, mcp25625_state, flash],
         spawn = [bms_event, canctrl_event]
     )]
     fn idle(cx: idle::Context) -> ! {

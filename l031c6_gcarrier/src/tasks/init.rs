@@ -27,6 +27,7 @@ use crate::config;
 use crate::tasks::led::ChargeIndicator;
 use crate::util::{current_stack_pointer, stack_lower_bound};
 use stm32l0xx_hal::pwm;
+use mcu_helper::color;
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let free_stack_bytes = current_stack_pointer() - stack_lower_bound();
@@ -200,7 +201,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let zvchg_disable_pin = gpiob.pb8.into_push_pull_output();
     // let mut precharge_enable = gpiob.pb8.into_push_pull_output();
     // precharge_enable.set_high().ok();
-    let afe_io = tasks::bms::AfeIo {
+    let mut afe_io = tasks::bms::AfeIo {
         afe_wake_pin,
         dcdc_en_pin: ps_5v0_bms_en,
         pack_div_en_pin,
@@ -228,7 +229,16 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
             }
         }
     // Prepare bq76920 config
-    let mut bq76920 = BQ769x0::new(config::BQ769X0_ADDRESS, config::CELL_COUNT as u8).unwrap();
+    let mut bq76920 = match bq769x0::BQ769x0::new_detect(&mut i2c, config::CELL_COUNT as u8) {
+        Some(bq) => {
+            writeln!(rtt, "bq769x0 detected 0x{:02x} crc: {}", bq.i2c_address(), bq.is_crc_used());
+            bq
+        },
+        None => {
+            writeln!(rtt, "{}bq769x0 detection failed{}", color::RED, color::DEFAULT);
+            bq769x0::BQ769x0::new(0x18, config::CELL_COUNT as u8, true).unwrap()
+        }
+    };
     match crate::tasks::bms::afe_init(&mut i2c, &mut bq76920) {
         Ok(_actual) => {
             let _ = writeln!(rtt, "afe init ok");
@@ -238,6 +248,31 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         }
         Err(e) => {
             let _ = writeln!(rtt, "afe init err:{:?}", e);
+        }
+    }
+
+    // Check config
+    if !config::Config::is_crc_correct() {
+        status_led.set_low().ok();
+        loop {
+            writeln!(rtt, "{}Config CRC invalid {:02x} {:02x}{}", color::RED, config::Config::calculate_crc(), config::Config::get().crc, color::DEFAULT).ok();
+            // writeln!(rtt, "{:x?}", config::Config::as_slice()).ok();
+            for _ in 0..200 {
+                error_led.set_high().ok();
+                cortex_m::asm::delay(ms2cycles_raw!(clocks, 50));
+                error_led.set_low().ok();
+                cortex_m::asm::delay(ms2cycles_raw!(clocks, 200));
+                watchdog.feed();
+            }
+            match bq76920.ship_enter(&mut i2c) {
+                Ok(_) => { // TODO: do not halt if feature "never-halt"? reboot into bootloader or wait can commands in that case so that bms is always online and can be accessed
+                    writeln!(rtt, "Halt: ok").ok();
+                    afe_io.dcdc_en_pin.set_low().ok();
+                },
+                Err(e) => {
+                    writeln!(rtt, "Halt: {:?}", e).ok();
+                }
+            }
         }
     }
 
@@ -252,10 +287,13 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let bms_state = tasks::bms::BmsState::default();
     let button_state = tasks::button::ButtonState::default();
 
+    let flash = hal::flash::FLASH::new(device.FLASH, &mut rcc);
+
      crate::init::LateResources {
         clocks,
         rcc,
         watchdog,
+        flash,
         bms_state,
         afe_io,
         adc,

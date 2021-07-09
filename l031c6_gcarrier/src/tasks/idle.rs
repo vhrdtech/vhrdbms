@@ -16,6 +16,7 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
             let mut mcp25625_state = cx.resources.mcp25625_state;
             let mut adc = cx.resources.adc;
             let spawn = cx.spawn;
+            let flash = cx.resources.flash;
         }
     }
 
@@ -29,7 +30,7 @@ pub fn idle(mut cx: crate::idle::Context) -> ! {
                                 afe_io.lock(|afe_io| {
                                      mcp25625_state.lock(|mcp25625| {
                                         rcc.lock(|rcc| {
-                                            super::cli::cli(rtt, i2c, bq769x0, spawn, afe_io, rcc, mcp25625, adc);
+                                            super::cli::cli(rtt, i2c, bq769x0, spawn, afe_io, rcc, mcp25625, adc, flash);
                                         })
                                      })
                                 })
