@@ -23,12 +23,10 @@ cfg-if = "1.0.0"
 vhrdcan = { git = "https://github.com/vhrdtech/vhrdcan.git", version = "0.1.0" }
 btoi = { version = "0.4.2", default-features = false }
 no-std-compat = "0.4.1"
-uavcan = { path = "../../uavcan" }
-uavcan_bridge = { path = "../../uavcan_bridge" }
+uavcan = { git = "https://github.com/romixlab/uavcan.git" }
+uavcan_bridge = { git = "https://github.com/romixlab/uavcan_bridge.git" }
 postcard = "0.7.0"
 embedded-time = "0.12.0"
-
-
 
 [dependencies.serde]
 version = "1.0.100"
@@ -36,8 +34,8 @@ features = ["derive"]
 default-features = false
 
 [dependencies.stm32l0xx-hal]
-#git = "https://github.com/romixlab/stm32l0xx-hal.git"
-path = "../../stm32l0xx-hal"
+git = "https://github.com/romixlab/stm32l0xx-hal.git"
+#path = "../../stm32l0xx-hal"
 version = "0.6.2"
 features = ["rt", "io-STM32L051", "stm32l0x1", "ufqfpn48", "eeprom-2048"]
 

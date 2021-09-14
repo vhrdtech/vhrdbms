@@ -341,7 +341,7 @@ dependencies = [
  "postcard",
  "power_helper",
  "serde",
- "stm32l0xx-hal",
+ "stm32l0xx-hal 0.6.2 (git+https://github.com/romixlab/stm32l0xx-hal.git)",
  "uavcan",
  "uavcan_bridge",
  "vhrdcan",
@@ -363,7 +363,7 @@ version = "0.1.0"
 dependencies = [
  "cortex-m 0.6.7",
  "cortex-m-rtic",
- "stm32l0xx-hal",
+ "stm32l0xx-hal 0.6.2",
 ]
 
 [[package]]
@@ -636,6 +636,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "stm32l0xx-hal"
+version = "0.6.2"
+source = "git+https://github.com/romixlab/stm32l0xx-hal.git#ad75e9fe60af4da37fc1e2a3a931112865ae9896"
+dependencies = [
+ "as-slice",
+ "cast",
+ "cortex-m 0.6.7",
+ "cortex-m-rt",
+ "cortex-m-semihosting",
+ "embedded-hal",
+ "nb 0.1.3",
+ "stm32l0",
+ "void",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -655,6 +671,7 @@ checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
 [[package]]
 name = "uavcan"
 version = "0.1.0"
+source = "git+https://github.com/romixlab/uavcan.git#e36b062606a007e0210d6b4a7b376e0480c0f24a"
 dependencies = [
  "crc-any",
  "heapless 0.6.1",
@@ -664,6 +681,7 @@ dependencies = [
 [[package]]
 name = "uavcan_bridge"
 version = "0.1.0"
+source = "git+https://github.com/romixlab/uavcan_bridge.git#aa732bf6688440b2317af54e93a1e93e087a8f64"
 dependencies = [
  "uavcan",
 ]

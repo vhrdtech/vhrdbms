@@ -271,7 +271,6 @@ fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
 use core::panic::PanicInfo;
 use stm32l0xx_hal::gpio::gpiob::PB2;
 use mcu_helper::color;
-use stm32l0xx_hal::pwm::Timer;
 
 #[inline(never)]
 #[panic_handler]
