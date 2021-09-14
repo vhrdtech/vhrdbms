@@ -69,11 +69,10 @@ fn mcp25625_bringup(mcp25625_state: &mut Mcp25625State, rcc: &mut crate::hal::rc
         rcc
     );
     // MCP25625 init
-    let one_cp: u32 = 1000; // tweak to be approx. one spi clock cycle
     mcp_parts.cs.set_high().ok();
     let irq = mcp_parts.irq.into_pull_up_input();
     cortex_m::asm::delay(100_000);
-    let mut mcp25625 = MCP25625::new(spi, mcp_parts.cs, one_cp);
+    let mut mcp25625 = MCP25625::new(spi, mcp_parts.cs, mcp_freq.0 * 1_000_000, rcc.clocks.sys_clk().0);
     match mcp25625_configure(&mut mcp25625) {
         Ok(()) => {
 
@@ -236,7 +235,7 @@ pub fn canctrl_event(cx: crate::canctrl_event::Context, e: Event, s: &mut State)
                 return;
             }
             afe_io.enable_s0_switches();
-            can_tx.heap.clear();
+            can_tx.clear();
             match mcp25625_bringup(mcp25625_state, rcc) {
                 Ok(()) => {
                     writeln!(rtt, "McpOk").ok();
@@ -306,20 +305,15 @@ pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
             continue;
         }
         let frame = mcp25625.receive(b.unwrap());
-        match can_rx.pool.new_frame_from_raw(frame) {
-            Ok(frame) => {
-                match can_rx.heap.push(frame) {
-                    Ok(_) => {
-                        write_if_cps!(rtt, "{}RX: {:?}{}", color::GREEN, frame, color::DEFAULT);
-                    },
-                    Err(_) => {
-                        write_if_cps!(rtt, "{}RX overflow{}", color::YELLOW, color::DEFAULT);
-                    }
-                }
-                new_frames = true;
+        match can_rx.push(frame, ()) {
+            Ok(_) => {
+                write_if_cps!(rtt, "{}RX: {:?}{}", color::GREEN, frame, color::DEFAULT);
             },
-            Err(_) => {}
+            Err(_) => {
+                write_if_cps!(rtt, "{}RX overflow{}", color::YELLOW, color::DEFAULT);
+            }
         }
+        new_frames = true;
     }
     if new_frames {
         cx.spawn.can_rx().ok();
@@ -330,18 +324,17 @@ pub fn canctrl_irq(cx: &mut crate::exti4_15::Context) {
     write_if_cps!(rtt, "TEC: {}, REC: {}", tec, rec);
 
     for _ in 0..3 {
-        let maybe_frame = can_tx.heap.peek().cloned();
-        match maybe_frame {
+        match can_tx.pop() {
             Some(frame) => {
                 // Treat extended id frames as uavcan, use only one buffer for them to avoid priority inversion
                 // If standard id frame is placed after extended one it will have to wait with this implementation!
-                let buffer_choice = match frame.id() {
+                let buffer_choice = match frame.0.id {
                     FrameId::Standard(_) => { mcp25625::TxBufferChoice::Any }
                     FrameId::Extended(_) => { mcp25625::TxBufferChoice::OnlyOne(0) }
                 };
-                match mcp25625.send(frame.as_raw_frame_ref(), buffer_choice, McpPriority::Highest) {
+                match mcp25625.send(frame.0.as_frame_ref(), buffer_choice, McpPriority::Highest) {
                     Ok(_) => {
-                        let _ = can_tx.heap.pop();
+                        // let _ = can_tx.heap.pop();
                         write_if_cps!(rtt, "{}TX: {:?}{}", color::CYAN, frame, color::DEFAULT);
                     }
                     Err(e) => {

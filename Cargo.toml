@@ -7,6 +7,9 @@ members = [
     "power_helper"
 ]
 
+[patch."https://github.com/vhrdtech/vhrdcan.git"]
+vhrdcan = { path = "../vhrdcan" }
+
 [profile.release]
 opt-level = "s"
 codegen-units = 1 # better optimizations

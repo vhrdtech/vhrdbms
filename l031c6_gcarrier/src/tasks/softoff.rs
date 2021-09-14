@@ -2,6 +2,7 @@ use crate::config;
 use crate::tasks::bms::BmsEvent;
 use mcu_helper::tim_cyccnt::U32Ext;
 use crate::util::EventSource;
+use vhrdcan::Frame;
 
 pub enum State {
     Initial,
@@ -37,8 +38,8 @@ enum InternalEvent {
 }
 
 fn send_notify(can_tx: &mut config::CanTX) {
-    let frame = can_tx.pool.new_frame(config::SOFTOFF_NOTIFY_FRAME_ID, r#"SOFTOFF"#.as_bytes()).unwrap();
-    let _ = can_tx.heap.push(frame);
+    let frame = Frame::new(config::SOFTOFF_NOTIFY_FRAME_ID, r#"SOFTOFF"#.as_bytes()).unwrap();
+    let _ = can_tx.push(frame, ());
     rtic::pend(config::CAN_TX_HANDLER);
 }
 

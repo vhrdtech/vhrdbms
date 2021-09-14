@@ -53,7 +53,7 @@ const APP: () = {
     }
 
     #[init(
-        spawn = [bms_event, canctrl_event, api, blinker, watchdog]
+        spawn = [bms_event, canctrl_event, api, blinker, watchdog, beeper]
     )]
     fn init(cx: init::Context) -> init::LateResources {
         tasks::init::init(cx)
@@ -227,7 +227,7 @@ const APP: () = {
             rtt
         ],
         schedule = [button_event],
-        spawn = [bms_event]
+        spawn = [bms_event, beeper]
     )]
     fn button_event(cx: button_event::Context) {
         tasks::button::button_event(cx);
@@ -242,11 +242,12 @@ const APP: () = {
     }
 
     #[task(
-        resources = [buzzer_pwm_channel],
-        schedule = [beeper]
+        resources = [&clocks,  buzzer_pwm_channel, afe_io],
+        schedule = [beeper],
+        capacity = 4,
     )]
     fn beeper(cx: beeper::Context, e: tasks::beeper::Event) {
-        static mut STATE: u32 = 0;
+        static mut STATE: tasks::beeper::State = tasks::beeper::State::new();
         tasks::beeper::beeper(cx, e, STATE);
     }
 
@@ -270,6 +271,7 @@ fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
 use core::panic::PanicInfo;
 use stm32l0xx_hal::gpio::gpiob::PB2;
 use mcu_helper::color;
+use stm32l0xx_hal::pwm::Timer;
 
 #[inline(never)]
 #[panic_handler]

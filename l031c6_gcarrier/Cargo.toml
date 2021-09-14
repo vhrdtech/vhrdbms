@@ -14,18 +14,21 @@ power_helper = { path = "../power_helper" }
 #alloc-cortex-m = "0.4.0"
 #rtt-target = { version = "0.2.2" }
 jlink_rtt = { git = "https://github.com/romixlab/jlink_rtt" }
-mcp25625 = { path = "../../mcp25625" }
-bq769x0 = { path = "../../bq769x0" }
-heapless = "0.5"
+mcp25625 = { git = "https://github.com/romixlab/mcp25625.git", version = "0.1.0" }
+bq769x0 = { git = "https://github.com/romixlab/bq769x0.git" }
+heapless = "0.7.5"
 hash32 = "0.1"
 cfg-if = "1.0.0"
 #tca9535 = { path = "../../tca9535-rs" }
-vhrdcan = { path = "../../vhrdcan" }
+vhrdcan = { git = "https://github.com/vhrdtech/vhrdcan.git", version = "0.1.0" }
 btoi = { version = "0.4.2", default-features = false }
 no-std-compat = "0.4.1"
 uavcan = { path = "../../uavcan" }
 uavcan_bridge = { path = "../../uavcan_bridge" }
 postcard = "0.7.0"
+embedded-time = "0.12.0"
+
+
 
 [dependencies.serde]
 version = "1.0.100"

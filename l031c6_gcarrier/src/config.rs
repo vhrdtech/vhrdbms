@@ -20,8 +20,8 @@ pub type Mcp25625Cs = PA9<Output<PushPull>>;
 pub type Mcp25625Spi = hal::pac::SPI1;
 pub type Mcp25625Instance = mcp25625::MCP25625<hal::spi::Spi<Mcp25625Spi, (Mcp25625Sck, Mcp25625Miso, Mcp25625Mosi)>, Mcp25625Cs>;
 pub type Mcp25625Irq = PA10<Input<PullUp>>;
-pub type CanTX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U16>;
-pub type CanRX = vhrdcan::FrameHeap<vhrdcan::heapless::consts::U8>;
+pub type CanTX = vhrdcan::heap::PlainHeap<(), 8, 16>;
+pub type CanRX = vhrdcan::heap::PlainHeap<(), 8, 8>;
 pub const CAN_TX_HANDLER: Interrupt = Interrupt::EXTI4_15;
 
 // DCDCs and Switches
@@ -49,8 +49,8 @@ pub const BUTTON_IRQ: Interrupt = Interrupt::EXTI4_15; // keep in sync with butt
 const BQ769X0_VARIANT: usize = bq769x0::BQ76920;
 pub type BQ769x0 = bq769x0::BQ769x0<{ BQ769X0_VARIANT }>;
 pub const CELL_COUNT: CellCount = CellCount::_4S;
-pub const BQ769X0_ADDRESS: u8 = 0x18;
-pub const BQ769X0_ALT_ADDRESS: u8 = 0x08;
+// pub const BQ769X0_ADDRESS: u8 = 0x18;
+// pub const BQ769X0_ALT_ADDRESS: u8 = 0x08;
 /// Halt after one of the cells drops below this threshold (HW)
 pub const CELL_UV_THRESHOLD: MilliVolts = MilliVolts(2950);
 /// Power off after one of the cells drops below this threshold (SW)

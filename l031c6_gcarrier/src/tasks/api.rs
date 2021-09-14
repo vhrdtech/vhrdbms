@@ -5,6 +5,7 @@ use crate::tasks::bms::BmsEvent;
 use crate::util::EventSource;
 use serde::{Serialize};
 use uavcan::tail_byte::TransferId;
+use vhrdcan::Frame;
 
 #[derive(Debug)]
 pub enum Event {
@@ -37,14 +38,14 @@ pub fn api(cx: crate::api::Context, e: Event) {
     let config = config::Config::get();
     match e {
         Event::SendHeartbeat => {
-            let frame = can_tx.pool.new_frame(uavcan_frameid!(config.uavcan_node_id, 0), &[]).unwrap();
-            let _ = can_tx.heap.push(frame);
+            // let frame = can_tx.pool.new_frame(uavcan_frameid!(config.uavcan_node_id, 0), &[]).unwrap();
+            let _ = can_tx.push(Frame::new(uavcan_frameid!(config.uavcan_node_id, 0), &[]).unwrap(), ());
             cx.schedule.api(cx.scheduled + ms2cycles!(clocks, config::HEARTBEAT_INTERVAL_MS), Event::SendHeartbeat).ok();
         }
         Event::SendPowerOnBurst(pcx) => {
             let payload = r#"ON"#;
-            let frame = can_tx.pool.new_frame(config::POWER_CONTROL_FRAME_ID, payload.as_bytes()).unwrap();
-            let _ = can_tx.heap.push(frame);
+            let frame = Frame::new(config::POWER_CONTROL_FRAME_ID, payload.as_bytes()).unwrap();
+            let _ = can_tx.push(frame, ());
             if pcx.messages_left > 0 {
                 let pcx = PowerBurstContext {
                     messages_left: pcx.messages_left - 1
@@ -54,8 +55,8 @@ pub fn api(cx: crate::api::Context, e: Event) {
         }
         Event::SendPowerOffBurst(pcx) => {
             let payload = r#"OFF"#;
-            let frame = can_tx.pool.new_frame(config::POWER_CONTROL_FRAME_ID, payload.as_bytes()).unwrap();
-            let _ = can_tx.heap.push(frame);
+            let frame = Frame::new(config::POWER_CONTROL_FRAME_ID, payload.as_bytes()).unwrap();
+            let _ = can_tx.push(frame, ());
             if pcx.messages_left > 0 {
                 let pcx = PowerBurstContext {
                     messages_left: pcx.messages_left - 1
@@ -83,21 +84,38 @@ pub fn send_telemetry(can_tx: &mut config::CanTX, telemetry: &Telemetry) {
     let telem_frame_id = uavcan_frameid!(config.uavcan_node_id, 10);
     if let Ok(payload) = used {
         for (frame_data, frame_len) in uavcan_bridge::to_uavcan(payload, unsafe { TELEM_SEQ_NUMBER }) {
-            let frame = can_tx.pool.new_frame(telem_frame_id, &frame_data[..frame_len]).unwrap();
-            let _ = can_tx.heap.push(frame);
+            let frame = Frame::new(telem_frame_id, &frame_data[..frame_len]).unwrap();
+            let _ = can_tx.push(frame, ());
         }
     }
+
+    let not_a_soc = telemetry.cell_voltages.iter().min().unwrap();
+    let not_a_soc = not_a_soc.0 as i32 - 3300;
+    let not_a_soc = not_a_soc * 100 / 800;
+    let not_a_soc = if not_a_soc < 0 {
+        0
+    } else if not_a_soc > 100 {
+        100
+    } else {
+        not_a_soc as u8
+    };
+    let soc_frame_id = uavcan_frameid!(config.uavcan_node_id, 11);
+    for (frame_data, frame_len) in uavcan_bridge::to_uavcan(&[not_a_soc], unsafe { TELEM_SEQ_NUMBER }) {
+        let frame = Frame::new(soc_frame_id, &frame_data[..frame_len]).unwrap();
+        let _ = can_tx.push(frame, ());
+    }
+
     unsafe { TELEM_SEQ_NUMBER.advance(); }
 }
 
 pub fn can_rx(cx: crate::can_rx::Context) {
     // let rtt = cx.resources.rtt;
     let can_rx: &mut config::CanRX = cx.resources.can_rx;
-    while let Some(frame) = can_rx.heap.pop() {
+    while let Some((frame, _)) = can_rx.pop() {
         // writeln!(rtt, "{:?}", frame).ok();
-        if frame.id() == config::SOFTOFF_NOTIFY_FRAME_ID {
+        if frame.id == config::SOFTOFF_NOTIFY_FRAME_ID {
             // cx.spawn.softoff(EventSource::RemoteNoForward).ok();
-        } else if frame.id() == config::POWER_CONTROL_FRAME_ID {
+        } else if frame.id == config::POWER_CONTROL_FRAME_ID {
             if frame.data().eq(r#"ON"#.as_bytes()) {
                 cx.spawn.bms_event(BmsEvent::PowerOn(EventSource::RemoteNoForward)).ok();
             } else if frame.data().eq(r#"OFF"#.as_bytes()) {

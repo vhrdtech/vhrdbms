@@ -1,10 +1,12 @@
 use core::fmt::Write;
 use mcu_helper::tim_cyccnt::U32Ext;
 use stm32l0xx_hal::exti::{Exti, GpioLine, ExtiLine};
-use crate::config;
+use crate::{config, tasks};
 use stm32l0xx_hal::prelude::InputPin;
 use crate::tasks::bms::{BmsEvent, };
 use crate::util::EventSource;
+use embedded_time::rate::Hertz;
+use embedded_time::duration::Milliseconds;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum ButtonState {
@@ -61,6 +63,7 @@ pub fn button_event(cx: crate::button_event::Context) {
                     ButtonState::Debounce(*checks_done + 1)
                 } else if *checks_done >= config::BUTTON_SHORT_PRESS_MS / CHECK_INTERVAL {
                     writeln!(rtt, "SHORT_PRESS").ok(); // TODO: bb
+                    cx.spawn.beeper(tasks::beeper::Event::BeepTone(Hertz::new(1000), Milliseconds::new(500))).ok();
 
                     ButtonState::Unpressed
                 } else {

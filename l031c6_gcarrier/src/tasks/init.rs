@@ -20,7 +20,6 @@ use hal::{
 
 use cfg_if::cfg_if;
 use stm32l0xx_hal::adc::{Precision, SampleTime};
-use bq769x0::BQ769x0;
 
 use crate::tasks;
 use crate::config;
@@ -28,6 +27,8 @@ use crate::tasks::led::ChargeIndicator;
 use crate::util::{current_stack_pointer, stack_lower_bound};
 use stm32l0xx_hal::pwm;
 use mcu_helper::color;
+use embedded_time::rate::Hertz;
+use embedded_time::duration::Milliseconds;
 
 pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let free_stack_bytes = current_stack_pointer() - stack_lower_bound();
@@ -78,9 +79,9 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut error_led = gpiob.pb1.into_push_pull_output();
     error_led.set_low().ok();
     // Buzzer
-    let pwm = pwm::Timer::new(device.TIM2, 360.hz(), &mut rcc);
+    let pwm_timer = pwm::Timer::new(device.TIM2, 360.hz(), &mut rcc);
     let buzzer = gpioa.pa0;
-    let buzzer_pwm_channel = pwm.channel1.assign(buzzer);
+    let buzzer_pwm_channel = pwm_timer.channel1.assign(buzzer);
     // Ring LEDs
     let led1 = gpiob.pb12.into_push_pull_output();
     let led2 = gpiob.pb13.into_push_pull_output();
@@ -184,8 +185,8 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     };
     let mcp25625_state = crate::tasks::canbus::Mcp25625State::PoweredDown(Some(mcp25625_parts));
     // Queues
-    let can_tx = config::CanTX::new();
-    let can_rx = config::CanRX::new();
+    let can_tx = config::CanTX::new(vhrdcan::heap::SortOn::Push);
+    let can_rx = config::CanRX::new(vhrdcan::heap::SortOn::Pop);
 
     // Power control
     // Enable predischarge MOSFET with current inrush limiting
@@ -231,11 +232,11 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     // Prepare bq76920 config
     let mut bq76920 = match bq769x0::BQ769x0::new_detect(&mut i2c, config::CELL_COUNT as u8) {
         Some(bq) => {
-            writeln!(rtt, "bq769x0 detected 0x{:02x} crc: {}", bq.i2c_address(), bq.is_crc_used());
+            writeln!(rtt, "bq769x0 detected 0x{:02x} crc: {}", bq.i2c_address(), bq.is_crc_used()).ok();
             bq
         },
         None => {
-            writeln!(rtt, "{}bq769x0 detection failed{}", color::RED, color::DEFAULT);
+            writeln!(rtt, "{}bq769x0 detection failed{}", color::RED, color::DEFAULT).ok();
             bq769x0::BQ769x0::new(0x18, config::CELL_COUNT as u8, true).unwrap()
         }
     };
@@ -282,6 +283,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     cx.spawn.api(tasks::api::Event::SendHeartbeat).unwrap();
     cx.spawn.blinker(tasks::led::Event::Toggle).unwrap();
     cx.spawn.canctrl_event(tasks::canbus::Event::BringDownWithPeriodicBringUp).ok();
+    cx.spawn.beeper(tasks::beeper::Event::BeepTone(Hertz::new(1000), Milliseconds::new(500))).ok();
     rtic::pend(config::BUTTON_IRQ); // if we got to this point, button was pressed
 
     let bms_state = tasks::bms::BmsState::default();
@@ -310,6 +312,5 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
         button_state,
         charge_indicator,
         buzzer_pwm_channel,
-
     }
 }

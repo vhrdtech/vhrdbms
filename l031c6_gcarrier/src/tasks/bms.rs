@@ -212,11 +212,11 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
             // if !bms_state.power_enabled {
             //     return;
             // }
-            if bms_state.charge_enabled && config::IS_SEPARATE_CHG_PATH == false {
-                writeln!(rtt, "Ignoring off due to charge").ok();
-                bms_state.power_enabled = false;
-                return;
-            }
+            // if bms_state.charge_enabled && config::IS_SEPARATE_CHG_PATH == false {
+            //     writeln!(rtt, "Ignoring off due to charge").ok();
+            //     bms_state.power_enabled = false;
+            //     return;
+            // }
             let _ = afe_discharge(i2c, bq769x0, false); // TODO: bb
             if config::IS_SEPARATE_CHG_PATH == false {
                 match bq769x0.charge(i2c, false) {
