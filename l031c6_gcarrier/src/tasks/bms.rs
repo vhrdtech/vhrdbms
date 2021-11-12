@@ -368,7 +368,7 @@ pub fn bms_event(cx: crate::bms_event::Context, e: tasks::bms::BmsEvent) {
 
             let cells_sum_voltage = cell_voltages.iter().fold(0, |acc, v| acc + v.0 as i32);
             if (cells_sum_voltage - afe_pack_voltage.0 as i32).abs() > 1000 {
-                writeln!(rtt, "{}Cell count seems to be invalid!{}", color::YELLOW, color::DEFAULT).ok();
+                writeln!(rtt, "{}Cell count seems to be invalid! {} {}{}", color::YELLOW, cells_sum_voltage, afe_pack_voltage.0, color::DEFAULT).ok();
             }
 
             let min_cell = *cell_voltages.iter().min().unwrap_or(&bq769x0::MilliVolts(0));

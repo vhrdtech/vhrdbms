@@ -79,7 +79,7 @@ pub fn init(cx: crate::init::Context) -> crate::init::LateResources {
     let mut error_led = gpiob.pb1.into_push_pull_output();
     error_led.set_low().ok();
     // Buzzer
-    let pwm_timer = pwm::Timer::new(device.TIM2, 360.hz(), &mut rcc);
+    let pwm_timer = pwm::Timer::new(device.TIM2, 2730.hz(), &mut rcc);
     let buzzer = gpioa.pa0;
     let buzzer_pwm_channel = pwm_timer.channel1.assign(buzzer);
     // Ring LEDs

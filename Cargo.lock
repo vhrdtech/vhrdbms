@@ -72,7 +72,6 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 [[package]]
 name = "bq769x0"
 version = "0.3.1"
-source = "git+https://github.com/romixlab/bq769x0.git#b3c7151d278085c484fa56b90862bc5c6c76552e"
 dependencies = [
  "bitflags",
  "cortex-m 0.6.7",
